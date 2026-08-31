@@ -93,9 +93,10 @@ serves `index.html`.
 3. (Optional) Add the Firebase environment variables above for cloud saves.
 4. Deploy — pupils get a URL like `https://blockwords.vercel.app`.
 
-Every push to `main` triggers a new deployment automatically.
+Every push to `main` triggers a new deployment automatically once the GitHub
+repo is connected in the Vercel project settings.
 
----
+**Live site:** https://blockwords.vercel.app
 
 ## 🎮 Controls
 

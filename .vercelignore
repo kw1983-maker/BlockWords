@@ -1,0 +1,7 @@
+*.pdf
+how to play.rtf
+.git
+.github
+CLAUDE.md
+firebase.json
+firestore.rules
