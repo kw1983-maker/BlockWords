@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "python build.py",
-  "outputDirectory": "."
+  "outputDirectory": ".",
+  "functions": {
+    "api/tts.js": {
+      "maxDuration": 10
+    }
+  }
 }

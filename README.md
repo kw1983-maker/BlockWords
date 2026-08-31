@@ -78,6 +78,23 @@ variables in your project settings, then redeploy:
 
 The build step writes `js/firebase-config.js` automatically from those variables.
 
+### High-quality voices (ElevenLabs)
+
+The game uses the browser's built-in voice by default. For a clearer British
+English voice (recommended in a classroom), add these in the Vercel project
+settings and redeploy:
+
+| Variable | Required | What it is |
+| --- | --- | --- |
+| `ELEVENLABS_API_KEY` | yes | API key from [elevenlabs.io](https://elevenlabs.io) |
+| `ELEVENLABS_VOICE_ID` | no | Defaults to **Alice** (`Xb7hH8MSUJpSbSDYk0k2`), a British educator voice |
+| `ELEVENLABS_MODEL_ID` | no | Defaults to `eleven_flash_v2_5` (fast enough for item names) |
+
+The key stays on the server. The game calls `/api/tts` and **falls back to the
+browser voice** if the key is missing, the quota runs out, or you open
+`index.html` from a file. Spoken phrases are cached in the browser so the same
+word is not billed twice in a session.
+
 ---
 
 ## 🚀 Deploy on Vercel

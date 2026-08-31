@@ -119,8 +119,14 @@ manages spawning, updating and despawning.
 **`js/audio.js`** — synthesised WebAudio effects and ambient music. No audio
 files. `materialOf(blockName)` maps a block onto its sound group.
 
-**`js/speech.js`** — the **only** path to text-to-speech. Prefers an en-GB voice,
-slows the rate, and debounces repeats.
+**`js/speech.js`** — the **only** path to text-to-speech. When `/api/tts` is
+configured (Vercel + `ELEVENLABS_API_KEY`) it plays a British ElevenLabs voice
+and caches clips; otherwise it uses `speechSynthesis` (preferring en-GB).
+Debounces repeats. Never call ElevenLabs or `speechSynthesis` from other files.
+
+**`api/tts.js`** — Vercel serverless proxy for ElevenLabs. Keeps the API key off
+the client. `GET` without text reports `{ configured }`; `GET`/`POST` with text
+returns `audio/mpeg`. Not bundled into `index.html`.
 
 **`js/words.js`** — ← **the file teachers edit.** Two tables: `YEARS` (one entry
 per class: sentence templates, quantity ranges, praise lines) and `PACKS` (one
@@ -160,7 +166,8 @@ particles, save/load, and `window.MC`.
 - `World.get/setBlock` are the only block accessors; `setBlock` marks the chunk
   and its neighbours dirty and records a save delta.
 - `Speech.say()` / `say()` is the only speech path; it cancels the previous
-  utterance so prompts never overlap.
+  utterance so prompts never overlap. The ElevenLabs key lives in
+  `ELEVENLABS_API_KEY` on Vercel, never in `js/`.
 - A word only becomes a quest if it has an `item`, `mob` or `block` — the game
   has to be able to point at the thing.
 - Villagers never speak concatenated English. Every sentence comes from a
