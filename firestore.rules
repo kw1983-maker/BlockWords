@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /saves/{name} {
+      allow read: if name.matches('^[a-z0-9_]{1,32}$');
+      allow create, update: if name.matches('^[a-z0-9_]{1,32}$')
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.data is map
+        && request.resource.size() < 900000;
+      allow delete: if false;
+    }
+  }
+}

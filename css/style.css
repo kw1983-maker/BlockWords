@@ -1,0 +1,424 @@
+/* Blocky, high-contrast UI. Chunky borders and hard shadows instead of
+   gradients, so it reads as the same family of game as the world does — and
+   stays legible on a classroom projector. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0d14;
+  color: #fff;
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#game { position: fixed; inset: 0; }
+canvas { display: block; }
+
+.hidden { display: none !important; }
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 2px 6px;
+  margin: 0 2px;
+  background: #d8d8d8;
+  color: #1a1a1a;
+  border: 2px solid #6a6a6a;
+  border-bottom-width: 4px;
+  border-radius: 3px;
+  font: bold 13px/1.2 monospace;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------- crosshair */
+#crosshair {
+  position: fixed;
+  left: 50%; top: 50%;
+  width: 22px; height: 22px;
+  margin: -11px 0 0 -11px;
+  pointer-events: none;
+  mix-blend-mode: difference;
+  z-index: 5;
+}
+#crosshair::before, #crosshair::after {
+  content: '';
+  position: absolute;
+  background: #fff;
+}
+#crosshair::before { left: 9px; top: 0; width: 4px; height: 22px; }
+#crosshair::after { top: 9px; left: 0; height: 4px; width: 22px; }
+
+/* ------------------------------------------------------------------- HUD */
+#hud {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 10px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.item-name {
+  min-height: 26px;
+  font-size: 20px;
+  font-weight: bold;
+  text-shadow: 2px 2px 0 #000;
+  opacity: 0;
+  transition: opacity .35s;
+  letter-spacing: .3px;
+}
+.item-name.show { opacity: 1; }
+
+#bars {
+  display: flex;
+  gap: 24px;
+  width: 484px;
+  max-width: 92vw;
+  justify-content: space-between;
+}
+.bar-row { display: flex; gap: 1px; }
+.pip {
+  width: 18px; height: 18px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(1px 1px 0 rgba(0,0,0,.7));
+}
+
+#hotbar {
+  display: flex;
+  gap: 0;
+  padding: 3px;
+  background: rgba(20, 20, 24, .72);
+  border: 3px solid #101014;
+  border-radius: 4px;
+}
+.slot {
+  position: relative;
+  width: 52px; height: 52px;
+  border: 2px solid #5c5c62;
+  background: rgba(139, 139, 139, .32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slot.sel {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #fff inset;
+  transform: scale(1.06);
+}
+.slot img {
+  width: 40px; height: 40px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.slot .count {
+  position: absolute;
+  right: 3px; bottom: 1px;
+  font: bold 15px/1 monospace;
+  text-shadow: 2px 2px 0 #000;
+}
+
+/* --------------------------------------------------------------- hint bar */
+#hint-bar {
+  position: fixed;
+  left: 50%; bottom: 118px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(10, 12, 18, .82);
+  border: 2px solid #6a6a72;
+  border-radius: 6px;
+  font-size: 17px;
+  text-shadow: 1px 1px 0 #000;
+  z-index: 4;
+  pointer-events: none;
+  max-width: 70vw;
+  text-align: center;
+}
+#hint-bar b { color: #ffd23f; }
+
+/* ---------------------------------------------------------------- toasts */
+#toasts {
+  position: fixed;
+  top: 12px; right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 7;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 300px;
+  padding: 12px 16px;
+  background: #1c1c22;
+  border: 3px solid #3a3a44;
+  border-left: 6px solid #ffd23f;
+  border-radius: 4px;
+  animation: toast-in .35s ease-out;
+}
+.toast.quest { border-left-color: #6ede7a; }
+.toast .toast-emoji { font-size: 30px; }
+.toast .toast-title { font-weight: bold; font-size: 17px; color: #ffd23f; }
+.toast.quest .toast-title { color: #6ede7a; }
+.toast .toast-sub { font-size: 14px; opacity: .88; }
+@keyframes toast-in { from { transform: translateX(40px); opacity: 0; } }
+
+/* ----------------------------------------------------------------- debug */
+#debug {
+  position: fixed;
+  top: 8px; left: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  background: rgba(10, 12, 18, .74);
+  font: 13px/1.5 monospace;
+  color: #dfe6ef;
+  white-space: pre;
+  z-index: 6;
+  pointer-events: none;
+  border-radius: 4px;
+}
+
+/* --------------------------------------------------------------- screens */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 14, .82);
+  z-index: 10;
+  overflow: auto;
+  padding: 20px;
+}
+#title { background: linear-gradient(180deg, #1b2a3f 0%, #0d1420 60%, #07090f 100%); }
+
+.panel {
+  background: #23232b;
+  border: 4px solid #14141a;
+  box-shadow: 0 0 0 3px #4a4a56 inset, 0 12px 40px rgba(0,0,0,.6);
+  border-radius: 6px;
+  padding: 24px 28px;
+  max-width: 640px;
+  width: 100%;
+  text-align: center;
+}
+.panel-title {
+  margin: 0 0 14px;
+  font-size: 26px;
+  text-shadow: 3px 3px 0 #000;
+}
+
+.logo {
+  margin: 0 0 6px;
+  font-size: 48px;
+  letter-spacing: 2px;
+  color: #f4f4f4;
+  text-shadow: 4px 4px 0 #1a1a1a, 8px 8px 0 rgba(0,0,0,.35);
+}
+.logo span { color: #6ede7a; }
+.tagline { margin: 0 0 18px; font-size: 17px; opacity: .85; }
+
+.btn-big, .btn-small {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 14px;
+  font: bold 20px/1 'Trebuchet MS', sans-serif;
+  color: #fff;
+  background: #4b8a3f;
+  border: 3px solid #12200f;
+  box-shadow: 0 0 0 2px #78bd68 inset, 0 5px 0 #2d5626;
+  border-radius: 4px;
+  cursor: pointer;
+  text-shadow: 2px 2px 0 rgba(0,0,0,.5);
+}
+.btn-big:hover { background: #58a349; }
+.btn-big:active { transform: translateY(3px); box-shadow: 0 0 0 2px #78bd68 inset, 0 2px 0 #2d5626; }
+.btn-small {
+  padding: 9px;
+  font-size: 16px;
+  background: #4a4a56;
+  box-shadow: 0 0 0 2px #767686 inset, 0 4px 0 #2a2a33;
+}
+.btn-small:hover { background: #56566a; }
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 15px;
+}
+.title-row input[type=text] {
+  flex: 1;
+  max-width: 280px;
+  padding: 9px 11px;
+  font: 15px monospace;
+  color: #fff;
+  background: #14141a;
+  border: 2px solid #5a5a66;
+  border-radius: 3px;
+}
+.pick-label { margin: 16px 0 8px; font-size: 15px; opacity: .8; }
+
+.pack-picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.pack-btn {
+  min-width: 108px;
+  padding: 9px 12px;
+  background: #33333d;
+  border: 3px solid #14141a;
+  box-shadow: 0 0 0 2px #55555f inset;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  text-align: center;
+}
+.pack-btn .pack-emoji { display: block; font-size: 24px; }
+.pack-btn .pack-blurb { display: block; font-size: 11px; opacity: .65; margin-top: 2px; }
+.pack-btn.sel { border-color: #6ede7a; box-shadow: 0 0 0 2px #6ede7a inset; background: #2c4030; }
+.pack-btn .pack-book { display: block; font-size: 10px; opacity: .5; margin-top: 3px; }
+.year-btn { min-width: 140px; }
+.year-btn.sel { border-color: #f2c14b; box-shadow: 0 0 0 2px #f2c14b inset; background: #40382c; }
+
+.controls-help { margin-top: 16px; text-align: left; font-size: 14px; }
+.controls-help summary { cursor: pointer; text-align: center; padding: 6px; opacity: .8; }
+.ctrl-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  padding: 10px 4px;
+}
+.hint-text { font-size: 13px; opacity: .6; margin: 12px 0 0; }
+.pause-opt { display: block; margin: 10px 0; font-size: 15px; }
+
+.progress { height: 16px; background: #14141a; border: 2px solid #5a5a66; border-radius: 3px; overflow: hidden; }
+#progress-fill { height: 100%; width: 0; background: #6ede7a; transition: width .2s; }
+.loading-title { margin: 0 0 14px; font-size: 22px; }
+
+/* ------------------------------------------------------------- inventory */
+.inv-panel { max-width: 560px; }
+.inv-top { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.inv-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 52px);
+  gap: 3px;
+  justify-content: center;
+  margin: 10px auto;
+  padding: 6px;
+  background: rgba(0,0,0,.3);
+  border-radius: 4px;
+}
+.craft-grid { display: grid; gap: 3px; }
+.craft-wrap { display: flex; align-items: center; gap: 14px; }
+.craft-arrow { font-size: 26px; opacity: .7; }
+.inv-help { font-size: 13px; opacity: .65; margin: 12px 0 0; }
+.inv-grid .slot, .craft-grid .slot { cursor: pointer; background: rgba(139,139,139,.25); }
+.inv-grid .slot:hover, .craft-grid .slot:hover { background: rgba(200,200,200,.34); }
+.slot-label {
+  position: absolute;
+  bottom: -18px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: .7;
+}
+.drag-stack {
+  position: fixed;
+  width: 44px; height: 44px;
+  pointer-events: none;
+  z-index: 30;
+  transform: translate(-50%, -50%);
+}
+.drag-stack img { width: 100%; height: 100%; image-rendering: pixelated; }
+.drag-stack .count { position: absolute; right: 0; bottom: 0; font: bold 14px monospace; text-shadow: 2px 2px 0 #000; }
+
+.furnace-row { display: flex; align-items: center; justify-content: center; gap: 16px; }
+.furnace-arrow { width: 60px; height: 12px; background: #14141a; border: 2px solid #5a5a66; }
+.furnace-arrow div { height: 100%; width: 0; background: #ffb03a; }
+.fuel-flame { font-size: 26px; opacity: .25; }
+.fuel-flame.lit { opacity: 1; }
+
+/* ---------------------------------------------------------------- quests */
+.quest-panel { max-width: 560px; }
+.quest-head { display: flex; align-items: center; gap: 12px; justify-content: center; }
+.quest-villager { font-size: 34px; }
+.speak-btn {
+  width: 44px; height: 44px;
+  font-size: 22px;
+  background: #33333d;
+  border: 3px solid #14141a;
+  box-shadow: 0 0 0 2px #55555f inset;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #fff;
+}
+.speak-btn:hover { background: #44444f; }
+.quest-visual { font-size: 76px; line-height: 1.1; margin: 10px 0; }
+.quest-text {
+  font-size: 26px;
+  font-weight: bold;
+  line-height: 1.35;
+  margin: 6px 0 12px;
+  text-shadow: 2px 2px 0 #000;
+}
+.quest-text .kw { color: #ffd23f; }
+.quest-progress { font-size: 19px; margin-bottom: 10px; opacity: .9; }
+.quest-progress .ok { color: #6ede7a; }
+.quest-buttons { display: flex; flex-direction: column; gap: 4px; }
+.quest-reward { font-size: 17px; margin: 8px 0; }
+
+/* ------------------------------------------------------- damage & death */
+#hurt-flash {
+  position: fixed; inset: 0;
+  background: rgba(180, 20, 20, .45);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .25s;
+  z-index: 8;
+}
+#water-tint {
+  position: fixed; inset: 0;
+  background: rgba(30, 90, 180, .34);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 3;
+}
+
+/* ------------------------------------------------------------------ signs */
+.sign-panel { max-width: 480px; }
+.sign-help { font-size: 15px; opacity: .8; margin: 0 0 14px; }
+.sign-input {
+  width: 100%;
+  padding: 14px;
+  font: bold 26px/1 'Trebuchet MS', sans-serif;
+  text-align: center;
+  color: #2a1c0c;
+  background: #d8b47a;
+  border: 4px solid #6e5330;
+  border-radius: 4px;
+  letter-spacing: 2px;
+}
+.sign-suggest { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 12px 0; }
+.sign-suggest button {
+  padding: 7px 11px;
+  font-size: 15px;
+  color: #fff;
+  background: #33333d;
+  border: 2px solid #14141a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sign-suggest button:hover { background: #45454f; }

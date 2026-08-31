@@ -1,0 +1,21 @@
+# Textbook PDFs — reference material, keep locally
+*.pdf
+
+# Firebase config with project keys (copy from firebase-config.example.js)
+js/firebase-config.js
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Firebase local cache
+.firebase/

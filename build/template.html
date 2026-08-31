@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlockWords — Minecraft-style English Adventure</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.92em' font-size='92'>&#129001;</text></svg>" />
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+  <style>
+/*__CSS__*/
+  </style>
+</head>
+<body>
+
+<div id="game"></div>
+
+<!-- ============ In-world HUD ============ -->
+<div id="crosshair" class="hidden"></div>
+
+<div id="hud" class="hidden">
+  <div id="item-name" class="item-name"></div>
+  <div id="bars">
+    <div id="hearts" class="bar-row"></div>
+    <div id="hunger" class="bar-row"></div>
+  </div>
+  <div id="hotbar"></div>
+</div>
+
+<div id="hint-bar" class="hidden"></div>
+
+<!-- Advancement / toast popups -->
+<div id="toasts"></div>
+
+<!-- F3 debug overlay -->
+<pre id="debug" class="hidden"></pre>
+
+<!-- ============ Screens ============ -->
+<div id="title" class="overlay">
+  <div class="panel title-panel">
+    <h1 class="logo">BLOCK<span>WORDS</span></h1>
+    <p class="tagline">Build, mine and explore &mdash; and learn English while you play.</p>
+
+    <div class="title-row">
+      <label for="name-input">Your name</label>
+      <input id="name-input" type="text" placeholder="e.g. Ali" maxlength="32" autocomplete="name" />
+    </div>
+
+    <div class="title-row">
+      <label for="seed-input">World seed</label>
+      <input id="seed-input" type="text" placeholder="leave blank for random" autocomplete="off" />
+    </div>
+
+    <p class="pick-label">Which class are you in?</p>
+    <div id="year-picker" class="pack-picker"></div>
+
+    <p class="pick-label">Choose this week's words</p>
+    <div id="pack-picker" class="pack-picker"></div>
+
+    <div class="title-row">
+      <label><input type="checkbox" id="opt-speech" checked /> Read English aloud 🔊</label>
+    </div>
+
+    <button id="btn-play" class="btn-big">Play</button>
+    <button id="btn-continue" class="btn-small hidden">Continue saved world</button>
+
+    <details class="controls-help">
+      <summary>Controls</summary>
+      <div class="ctrl-grid">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Move</span>
+        <span><kbd>Mouse</kbd></span><span>Look around</span>
+        <span><kbd>Space</kbd></span><span>Jump / swim up</span>
+        <span><kbd>Shift</kbd></span><span>Sneak (won't fall off edges)</span>
+        <span><kbd>Ctrl</kbd></span><span>Sprint</span>
+        <span><kbd>Left-click</kbd></span><span>Mine the block you are looking at</span>
+        <span><kbd>Right-click</kbd></span><span>Place block / use / talk to villager</span>
+        <span><kbd>1</kbd>&ndash;<kbd>9</kbd> / scroll</span><span>Choose hotbar slot</span>
+        <span><kbd>E</kbd></span><span>Open inventory &amp; crafting</span>
+        <span><kbd>Q</kbd></span><span>Drop item</span>
+        <span><kbd>F5</kbd></span><span>Change camera view</span>
+        <span><kbd>F3</kbd></span><span>Debug info</span>
+        <span><kbd>Esc</kbd></span><span>Pause menu</span>
+      </div>
+    </details>
+    <p class="hint-text" id="title-hint">Tip: needs internet on the first run to fetch the 3D engine.</p>
+  </div>
+</div>
+
+<div id="loading" class="overlay hidden">
+  <div class="panel">
+    <h2 class="loading-title">Building the world…</h2>
+    <div class="progress"><div id="progress-fill"></div></div>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2 class="panel-title">Game Paused</h2>
+    <button id="btn-resume" class="btn-big">Back to Game</button>
+    <button id="btn-save" class="btn-small">Save World</button>
+    <label class="pause-opt"><input type="checkbox" id="opt-speech2" checked /> Read English aloud 🔊</label>
+    <label class="pause-opt"><input type="checkbox" id="opt-music" checked /> Music 🎵</label>
+    <label class="pause-opt">Render distance <input id="opt-dist" type="range" min="3" max="10" value="6" /> <span id="dist-val">6</span></label>
+    <button id="btn-quit" class="btn-small">Save &amp; Quit to Title</button>
+  </div>
+</div>
+
+<!-- Inventory / crafting / furnace all share this screen -->
+<div id="inv-screen" class="overlay hidden">
+  <div class="panel inv-panel">
+    <h2 id="inv-title" class="panel-title">Inventory</h2>
+    <div id="inv-top" class="inv-top"></div>
+    <div id="inv-main" class="inv-grid"></div>
+    <div id="inv-hotbar" class="inv-grid"></div>
+    <p class="inv-help">Click to pick up a stack, click again to place it. <kbd>Esc</kbd> or <kbd>E</kbd> to close.</p>
+  </div>
+  <div id="drag-stack" class="drag-stack hidden"></div>
+</div>
+
+<!-- Villager quest dialog -->
+<div id="quest-screen" class="overlay hidden">
+  <div class="panel quest-panel">
+    <div class="quest-head">
+      <span class="quest-villager">🧑‍🌾</span>
+      <h2 id="quest-name" class="panel-title">Villager</h2>
+      <button id="quest-speak" class="speak-btn" title="Say it again">🔊</button>
+    </div>
+    <div id="quest-visual" class="quest-visual"></div>
+    <p id="quest-text" class="quest-text"></p>
+    <div id="quest-progress" class="quest-progress"></div>
+    <div class="quest-buttons">
+      <button id="quest-accept" class="btn-big">OK!</button>
+      <button id="quest-deliver" class="btn-big hidden">Give it to me</button>
+      <button id="quest-close" class="btn-small">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Write a word on a sign -->
+<div id="sign-screen" class="overlay hidden">
+  <div class="panel sign-panel">
+    <h2 class="panel-title">Write on the sign</h2>
+    <p class="sign-help">Type a word, then press OK. The sign will read it out loud.</p>
+    <input id="sign-input" class="sign-input" type="text" maxlength="24" autocomplete="off" />
+    <div id="sign-suggest" class="sign-suggest"></div>
+    <button id="sign-ok" class="btn-big">OK</button>
+    <button id="sign-cancel" class="btn-small">Cancel</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+/*__JS__*/
+</script>
+
+<script>
+  // Friendly message if the CDN copy of Three.js could not be fetched.
+  setTimeout(function () {
+    if (!window.MC) {
+      var h = document.getElementById('title-hint');
+      if (h) {
+        h.innerHTML = '⚠️ Could not load the 3D engine (Three.js). Connect to the internet ' +
+          'for the first run — it is fetched from a CDN — then reload this page.';
+        h.style.color = '#ffd23f';
+      }
+    }
+  }, 6000);
+</script>
+</body>
+</html>
