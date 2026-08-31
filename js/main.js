@@ -1000,6 +1000,7 @@ function drawDebug() {
     'entities ' + entities.mobs.length + ' mobs, ' + entities.items.length + ' items, ' +
       entities.villagers.length + ' villagers',
     'words learned ' + quests.learned.size + '/' + quests.pack.words.length,
+    'voice  ' + Speech.engine + (Speech.enabled ? '' : '  (off)'),
   ]);
 }
 
@@ -1077,7 +1078,8 @@ function boot() {
     tp(x, y, z) { player.pos.set(x, y, z); player.vel.set(0, 0, 0); },
     give(item, n = 1) { inventory.add(item, n); renderHotbar(inventory); },
     setTime(p) { sky.setPhase(p); },
-    PACKS, YEARS,
+    PACKS, YEARS, Speech,
+    say, sayLines,
     get year() { return quests ? quests.year : null; },
     // Swap the class without restarting: MC.setYear(4)
     setYear(n) { state.year = Number(n); return quests.setYear(n); },
