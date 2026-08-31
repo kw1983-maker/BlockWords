@@ -1079,6 +1079,7 @@ function boot() {
     give(item, n = 1) { inventory.add(item, n); renderHotbar(inventory); },
     setTime(p) { sky.setPhase(p); },
     PACKS, YEARS, Speech,
+    say, sayLines,
     get year() { return quests ? quests.year : null; },
     // Swap the class without restarting: MC.setYear(4)
     setYear(n) { state.year = Number(n); return quests.setYear(n); },

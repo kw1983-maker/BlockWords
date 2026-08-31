@@ -191,6 +191,7 @@ MC.talk(0, 'fetch')     MC.completeQuest()        MC.findVillager()
 MC.craft(['oak_log'], 2)                          MC.smelt('iron_ore')
 MC.mineAt(x, y, z)      MC.profile()   // ms to generate/light/mesh one chunk
 MC.save()               MC.fps()
+MC.say('hello')         MC.Speech.engine          // 'elevenlabs' or 'browser'
 ```
 
 Note when testing in an automated browser: background tabs are throttled to
