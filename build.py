@@ -8,6 +8,8 @@ CDN — https CDN imports are allowed over file://, local module files are not.
 
 Run:  python build.py
 """
+import json
+import os
 import re
 from pathlib import Path
 
@@ -64,7 +66,29 @@ def strip_module_syntax(src: str) -> str:
     return "\n".join(out)
 
 
+def write_firebase_config() -> None:
+    """Write js/firebase-config.js from environment variables (Vercel / CI)."""
+    keys = {
+        "apiKey": os.environ.get("FIREBASE_API_KEY"),
+        "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN"),
+        "projectId": os.environ.get("FIREBASE_PROJECT_ID"),
+        "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET"),
+        "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID"),
+        "appId": os.environ.get("FIREBASE_APP_ID"),
+    }
+    if not keys["apiKey"] or not keys["projectId"]:
+        return
+    lines = ["export const FIREBASE_CONFIG = {"]
+    for name, value in keys.items():
+        lines.append(f"  {name}: {json.dumps(value)},")
+    lines.append("};")
+    path = ROOT / "js/firebase-config.js"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"  wrote {path.name} from environment variables")
+
+
 def main() -> None:
+    write_firebase_config()
     css = (ROOT / "css/style.css").read_text(encoding="utf-8")
 
     chunks = []

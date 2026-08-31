@@ -70,10 +70,30 @@ One-time setup for teachers or developers who want cross-device saves:
    ```
 5. Rebuild: `python build.py`
 
-For **GitHub Pages**, add these repository secrets so the deploy workflow can
-inject the config at build time: `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
-`FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`,
-`FIREBASE_APP_ID`.
+For **Vercel** (recommended for hosting), add the same values as environment
+variables in your project settings, then redeploy:
+
+`FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`,
+`FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID`
+
+The build step writes `js/firebase-config.js` automatically from those variables.
+
+---
+
+## 🚀 Deploy on Vercel
+
+The game is a static site. Vercel runs `python build.py` on each deploy and
+serves `index.html`.
+
+1. Import the GitHub repo at [vercel.com/new](https://vercel.com/new) — choose
+   **kw1983-maker/BlockWords**.
+2. Leave the build settings as detected from [`vercel.json`](vercel.json):
+   - **Build command:** `python build.py`
+   - **Output directory:** `.`
+3. (Optional) Add the Firebase environment variables above for cloud saves.
+4. Deploy — pupils get a URL like `https://blockwords.vercel.app`.
+
+Every push to `main` triggers a new deployment automatically.
 
 ---
 
