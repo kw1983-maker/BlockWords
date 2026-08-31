@@ -173,7 +173,7 @@ export class QuestSystem {
   speakQuest(q, villager) {
     const who = villager && villager.name ? villager.name + ' says.' : '';
     const lead = this.year.leadWord ? q.word.word : '';
-    sayLines([who, lead, q.text, q.sentence]);
+    sayLines([who, lead, q.text, q.sentence], { narrative: true });
   }
 
   // What the villager says when the job is done, in this class's English.
@@ -233,7 +233,7 @@ export class QuestSystem {
           if (this.onToast) {
             this.onToast('You found a ' + wanted + '!', 'Go back to ' + (v.name || 'the villager'), q.emoji);
           }
-          say('You found a ' + wanted + '. ' + (q.word.sentence || ''), { force: true });
+          say('You found a ' + wanted + '. ' + (q.word.sentence || ''), { force: true, narrative: true });
           break;
         }
       }

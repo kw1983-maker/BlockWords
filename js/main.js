@@ -425,7 +425,7 @@ function finishStart(freshSpawn) {
   clock = performance.now();
   requestAnimationFrame(loop);
 
-  sayLines(['Welcome to Block Words!', 'Find a villager and listen to the job.']);
+  sayLines(['Welcome to Block Words!', 'Find a villager and listen to the job.'], { narrative: true });
   toast('Welcome!', 'Explore, mine and build. Talk to villagers.', '🌍');
   requestPointerLock();
 }
@@ -434,7 +434,7 @@ function wireCallbacks() {
   player.onHurt = () => { flashHurt(); Sfx.hurt(); };
   player.onDeath = () => {
     toast('Oh no!', 'You will wake up at your spawn point.', '💫');
-    say('Oh no! You fainted. Try again!', { force: true });
+    say('Oh no! You fainted. Try again!', { force: true, narrative: true });
     setTimeout(() => { player.respawn(); renderBars(player); }, 1500);
   };
 
@@ -459,7 +459,7 @@ function wireCallbacks() {
   advancements.onEarn = (a) => {
     toast(a.title, a.text, a.emoji);
     Sfx.levelUp();
-    say(a.text, { force: true });
+    say(a.text, { force: true, narrative: true });
   };
 
   initUI({

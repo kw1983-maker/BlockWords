@@ -3,6 +3,7 @@
 
 # Firebase config with project keys (copy from firebase-config.example.js)
 js/firebase-config.js
+js/elevenlabs-config.js
 
 # Python
 __pycache__/
@@ -19,3 +20,5 @@ Thumbs.db
 
 # Firebase local cache
 .firebase/
+.vercel
+.env*

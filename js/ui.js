@@ -416,7 +416,7 @@ export function openQuest(villager, quests) {
       el.questDeliver.classList.add('hidden');
       el.questAccept.classList.remove('hidden');
       el.questAccept.textContent = 'Bye!';
-      sayLines(['Thank you! Well done!', q.word.sentence || '']);
+      sayLines(['Thank you! Well done!', q.word.sentence || ''], { narrative: true });
       Sfx.levelUp();
     }
   };

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ElevenLabs": {
+      "command": "C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+      "args": ["-m", "elevenlabs_mcp.server"],
+      "envFile": "C:\\Users\\User\\Documents\\Claude\\Minecraft\\.env.local"
+    }
+  }
+}
