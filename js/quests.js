@@ -6,6 +6,7 @@
 import { B, BLOCKS } from './blocks.js';
 import { ITEMS, itemLabel } from './items.js';
 import { MOB_TYPES } from './entities.js';
+import { biomeAt, heightAt, SEA_LEVEL } from './worldgen.js';
 import {
   numberWord, ordinalWord, plural, packById, countPhrase,
   yearById, packsForYear, fillLine, pickLine, PACKS,
@@ -20,24 +21,26 @@ const VILLAGER_NAMES = [
 let questCounter = 0;
 
 export class QuestSystem {
-  constructor(packId, year, entities, player, inventory, world) {
+  constructor(packId, year, entities, player, inventory, world, sky) {
     this.pack = packById(packId);
     this.year = yearById(year);
     this.entities = entities;
     this.player = player;
     this.inventory = inventory;
     this.world = world;
+    this.sky = sky;
     this.learned = new Set();      // words the player has completed a quest for
     this.completed = 0;
     this.emeralds = 0;
     this.onToast = null;           // (title, subtitle, emoji) => void
     this.onQuestDone = null;       // (quest) => void
+    this.give = null;              // (item, count) => void; drops what will not fit
     this.findCheck = 0;
   }
 
-  // A word can only become a quest if the world contains the thing it names.
+  // A word can only become a quest if the world can point at the thing it names.
   usableWords() {
-    const words = this.pack.words.filter((w) => w.item || w.mob || w.block);
+    const words = this.pack.words.filter((w) => w.item || w.mob || w.block || w.visit || w.proxyItem);
     if (words.length) return words;
     // Numbers-only packs have nothing of their own, so they borrow objects
     // from another pack in the same year — the counting is the point, but it
@@ -53,7 +56,7 @@ export class QuestSystem {
   // How many of a thing to ask for. The year sets the range; a word can pin its
   // own, because ten diamonds is a different afternoon from ten apples.
   countFor(word, type) {
-    if (type === 'find') return 1;
+    if (type === 'find' || type === 'visit') return 1;
     const range = word.count || (this.year.counts && this.year.counts[type]) || [1, 3];
     const lo = range[0], hi = Math.max(range[0], range[1]);
     return lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -71,9 +74,10 @@ export class QuestSystem {
     const w = this.pickWord();
     const id = ++questCounter;
     const kinds = [];
-    if (w.item && ITEMS[w.item]) kinds.push('fetch');
+    if ((w.item && ITEMS[w.item]) || (w.proxyItem && ITEMS[w.proxyItem])) kinds.push('fetch');
     if (w.mob && MOB_TYPES[w.mob]) kinds.push('find');
     if (w.block && B[w.block.toUpperCase()] !== undefined) kinds.push('place');
+    if (w.visit) kinds.push('visit');
     const type = kinds[Math.floor(Math.random() * kinds.length)] || 'fetch';
 
     const count = this.countFor(w, type);
@@ -102,7 +106,7 @@ export class QuestSystem {
     if (type === 'fetch' && w.uncountable) lineKey = 'fetchU';
 
     if (type === 'fetch') {
-      q.item = w.item;
+      q.item = w.proxyItem || w.item;
     } else if (type === 'find') {
       q.mob = w.mob;
       q.mobColour = w.mobColour || null;
@@ -111,13 +115,17 @@ export class QuestSystem {
       const what = q.mobColour ? q.mobColour + ' ' + MOB_TYPES[w.mob].label.toLowerCase() : w.word;
       q.findName = what;
       vars.mob = what;
+    } else if (type === 'visit') {
+      q.visit = w.visit;
     } else {
       q.block = B[w.block.toUpperCase()];
       q.blockName = w.block;
       q.origin = villager.pos.clone();
+      q.baseline = this.countBlocksNear(q.origin, q.block, Infinity);
       vars.block = w.block.replace(/_/g, ' ');
     }
 
+    q.vars = vars;
     const tpl = pickLine(this.pack, this.year, lineKey);
     q.text = fillLine(tpl, vars);
     q.hint = fillLine((this.year.hints && this.year.hints[type]) || '', vars);
@@ -125,6 +133,12 @@ export class QuestSystem {
     // second time straight afterwards.
     if (tpl.indexOf('{sentence}') !== -1) q.sentence = '';
     return q;
+  }
+
+  // Any other line the game speaks, from COMMON_LINES or the year's overrides —
+  // never concatenated English.
+  line(key, vars) {
+    return fillLine(pickLine(this.pack, this.year, key), vars || {});
   }
 
   // Swap the class mid-session. Used by the debug console and by nothing else —
@@ -147,22 +161,27 @@ export class QuestSystem {
   measure(q, villager) {
     if (!q) return 0;
     if (q.type === 'fetch') return Math.min(q.count, this.inventory.count(q.item));
-    if (q.type === 'find') return q.progress;
+    if (q.type === 'find' || q.type === 'visit') return q.progress;
     if (q.type === 'place') {
-      const o = villager ? villager.pos : q.origin;
-      let n = 0;
-      const cx = Math.floor(o.x), cy = Math.floor(o.y), cz = Math.floor(o.z);
-      for (let x = cx - 6; x <= cx + 6; x++) {
-        for (let z = cz - 6; z <= cz + 6; z++) {
-          for (let y = cy - 3; y <= cy + 5; y++) {
-            if (this.world.getBlock(x, y, z) === q.block) n++;
-            if (n >= q.count) return q.count;
-          }
-        }
-      }
-      return n;
+      // Only blocks added since the errand began count — a village built of
+      // planks must not finish "place three planks" on its own.
+      const n = this.countBlocksNear(q.origin, q.block, q.baseline + q.count);
+      return Math.max(0, Math.min(q.count, n - q.baseline));
     }
     return 0;
+  }
+
+  countBlocksNear(o, block, stopAt) {
+    let n = 0;
+    const cx = Math.floor(o.x), cy = Math.floor(o.y), cz = Math.floor(o.z);
+    for (let x = cx - 6; x <= cx + 6; x++) {
+      for (let z = cz - 6; z <= cz + 6; z++) {
+        for (let y = cy - 3; y <= cy + 5; y++) {
+          if (this.world.getBlock(x, y, z) === block && ++n >= stopAt) return n;
+        }
+      }
+    }
+    return n;
   }
 
   ready(q, villager) { return this.measure(q, villager) >= q.count; }
@@ -204,7 +223,9 @@ export class QuestSystem {
       const e = extras[Math.floor(Math.random() * extras.length)];
       reward.push(e);
     }
-    for (const [item, n] of reward) this.inventory.add(item, n);
+    for (const [item, n] of reward) {
+      if (this.give) this.give(item, n); else this.inventory.add(item, n);
+    }
     q.reward = reward;
     q.praise = this.praiseLine();
     q.ordinal = ordinalWord(this.completed);
@@ -215,29 +236,57 @@ export class QuestSystem {
     return true;
   }
 
-  // "Find a cow" completes by standing near one.
+  // "Find a cow" and "visit the sea" complete by standing in the right place.
   update(dt) {
     this.findCheck -= dt;
     if (this.findCheck > 0) return;
     this.findCheck = 0.4;
     const p = this.player.pos;
+    this.entities.wanted = this.wantedMobs();
     for (const v of this.entities.villagers) {
       const q = v.quest;
-      if (!q || q.type !== 'find' || q.done || q.progress >= 1) continue;
-      const wanted = q.findName || q.word.word;
-      for (const m of this.entities.mobs) {
-        if (m.type !== q.mob) continue;
-        if (q.mobColour && m.colourName !== q.mobColour) continue;
-        if (m.pos.distanceTo(p) < 4.5) {
-          q.progress = 1;
-          if (this.onToast) {
-            this.onToast('You found a ' + wanted + '!', 'Go back to ' + (v.name || 'the villager'), q.emoji);
+      if (!q || q.done) continue;
+
+      if (q.type === 'find' && q.progress < 1) {
+        for (const m of this.entities.mobs) {
+          if (m.type !== q.mob) continue;
+          if (q.mobColour && m.colourName !== q.mobColour) continue;
+          if (m.pos.distanceTo(p) < 4.5) {
+            q.progress = 1;
+            this.announceDone(q, v, 'found');
+            break;
           }
-          say('You found a ' + wanted + '. ' + (q.word.sentence || ''), { force: true, narrative: true });
-          break;
         }
       }
+
+      if (q.type === 'visit' && q.progress < 1 && checkVisit(q.visit, this.player, this.world, this.sky, this.entities)) {
+        q.progress = 1;
+        this.announceDone(q, v, 'visited');
+      }
     }
+  }
+
+  // "You found a red sheep! Go back to Farmer Ana." — toast and voice.
+  announceDone(q, v, key) {
+    const vars = Object.assign({}, q.vars, { mob: q.findName || q.word.word });
+    const done = this.line(key, vars);
+    const back = this.line('goBack', { name: v.name || 'the villager' });
+    if (this.onToast) this.onToast(done, back, q.emoji);
+    sayLines([done, q.word.sentence, back], { narrative: true });
+  }
+
+  // Animals an open errand depends on — "find a red sheep" or "bring red wool"
+  // — so the spawner can make sure one is somewhere nearby.
+  wantedMobs() {
+    const out = [];
+    for (const v of this.entities.villagers) {
+      const q = v.quest;
+      if (!q || q.done) continue;
+      if (q.type === 'find' && q.progress < 1) out.push({ type: q.mob, colour: q.mobColour });
+      const wool = q.type === 'fetch' && /^(\w+)_wool$/.exec(q.item);
+      if (wool) out.push({ type: 'sheep', colour: wool[1] });
+    }
+    return out;
   }
 
   wordList() {
@@ -256,12 +305,13 @@ export function validateWords() {
     if (!pack.years || !pack.years.length) bad.push(pack.id + ': no `years`');
     for (const w of pack.words) {
       if (w.item && !ITEMS[w.item]) bad.push(pack.id + '/' + w.word + ': no such item "' + w.item + '"');
+      if (w.proxyItem && !ITEMS[w.proxyItem]) bad.push(pack.id + '/' + w.word + ': no such proxy item "' + w.proxyItem + '"');
       if (w.mob && !MOB_TYPES[w.mob]) bad.push(pack.id + '/' + w.word + ': no such mob "' + w.mob + '"');
       if (w.block && B[w.block.toUpperCase()] === undefined) {
         bad.push(pack.id + '/' + w.word + ': no such block "' + w.block + '"');
       }
     }
-    if (!pack.numbersOnly && !pack.words.some((w) => w.item || w.mob || w.block)) {
+    if (!pack.numbersOnly && !pack.words.some((w) => w.item || w.mob || w.block || w.visit || w.proxyItem)) {
       bad.push(pack.id + ': no word can become a quest');
     }
   }
@@ -273,6 +323,51 @@ function hashString(s) {
   let h = 0;
   for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0;
   return h;
+}
+
+function nearWater(world, x, y, z, r) {
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -1; dy <= 2; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (world.getBlock(x + dx, y + dy, z + dz) === B.WATER) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function checkVisit(kind, player, world, sky, entities) {
+  const px = Math.floor(player.pos.x);
+  const py = Math.floor(player.pos.y);
+  const pz = Math.floor(player.pos.z);
+  const seed = world.seed;
+  const h = heightAt(seed, px, pz);
+
+  switch (kind) {
+    case 'sea':
+      return world.getBlock(px, py, pz) === B.WATER
+        || world.getBlock(px, py - 1, pz) === B.WATER
+        || nearWater(world, px, py, pz, 2);
+    case 'sun':
+      return sky && sky.daylight > 0.55
+        && world.getBlock(px, py + 1, pz) === B.AIR
+        && py > SEA_LEVEL + 2;
+    case 'shell':
+      return world.getBlock(px, py - 1, pz) === B.SAND && nearWater(world, px, py, pz, 5);
+    case 'desert':
+      return biomeAt(seed, px, pz, h).name === 'Desert';
+    case 'village':
+      for (const v of entities.villagers) {
+        if (v.pos.distanceTo(player.pos) < 10) return true;
+      }
+      return false;
+    case 'grass':
+      return world.getBlock(px, py - 1, pz) === B.GRASS_BLOCK;
+    case 'water':
+      return nearWater(world, px, py, pz, 4);
+    default:
+      return false;
+  }
 }
 
 // ------------------------------------------------------------- advancements

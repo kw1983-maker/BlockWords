@@ -85,6 +85,14 @@ kbd {
   justify-content: space-between;
 }
 .bar-row { display: flex; gap: 1px; }
+.emeralds {
+  position: absolute;
+  right: calc(50% - 300px);
+  bottom: 14px;
+  font: bold 20px/1 'Trebuchet MS', sans-serif;
+  text-shadow: 2px 2px 0 #000;
+}
+@media (max-width: 640px) { .emeralds { position: static; } }
 .pip {
   width: 18px; height: 18px;
   background-size: contain;
@@ -152,7 +160,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 7;
+  z-index: 20;   /* above every overlay, so title-screen messages show too */
   pointer-events: none;
 }
 .toast {
@@ -379,6 +387,7 @@ kbd {
 .quest-progress .ok { color: #6ede7a; }
 .quest-buttons { display: flex; flex-direction: column; gap: 4px; }
 .quest-reward { font-size: 17px; margin: 8px 0; }
+.quest-hint { display: inline-block; margin-top: 6px; font-size: 16px; opacity: .8; }
 
 /* ------------------------------------------------------- damage & death */
 #hurt-flash {
@@ -422,3 +431,78 @@ kbd {
   cursor: pointer;
 }
 .sign-suggest button:hover { background: #45454f; }
+
+/* ------------------------------------------------------------- word book */
+.wordbook-panel { max-width: 620px; }
+.wordbook-progress { font-size: 18px; margin: 0 0 12px; opacity: .9; }
+.wordbook-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+.wordbook-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  background: #2a2a34;
+  border: 3px solid #14141a;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #fff;
+  opacity: .55;
+}
+.wordbook-card.learned { opacity: 1; border-color: #6ede7a; }
+.wordbook-card:hover { background: #38384a; }
+.wb-emoji { font-size: 32px; line-height: 1; }
+.wb-word { font-size: 14px; font-weight: bold; text-transform: capitalize; }
+
+/* --------------------------------------------------------------- teacher */
+.teacher-panel { max-width: 440px; }
+.teacher-help { font-size: 15px; opacity: .85; margin: 0 0 12px; }
+.teacher-filter { margin-top: 8px; font-size: 18px; }
+.teacher-status { font-size: 15px; min-height: 1.2em; margin: 10px 0; opacity: .9; }
+.btn-teacher { margin-top: 8px; opacity: .85; }
+.continue-info { margin: -4px 0 8px; font-size: 14px; opacity: .8; }
+.btn-big.armed { background: #b5542f; box-shadow: 0 0 0 2px #e08a62 inset, 0 5px 0 #6e2f17; }
+.optional { font-size: 12px; opacity: .65; font-weight: normal; }
+
+/* ------------------------------------------------------------- tutorial */
+.tutorial-hint {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92vw;
+  padding: 12px 18px;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+  color: #fff;
+  background: rgba(20, 20, 30, .88);
+  border: 3px solid #ffd23f;
+  border-radius: 8px;
+  z-index: 9;   /* below the overlays, so it never covers a dialog */
+  text-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- UI scale */
+/* "Screen size" enlarges the 2D interface only. The 3D canvas must never be
+   scaled, or the crosshair stops lining up with the block being mined. */
+:root { --ui-scale: 1; }
+.overlay > .panel, #hud, #hint-bar, #toasts, .tutorial-hint {
+  zoom: var(--ui-scale);
+}
+/* The dragged stack follows the mouse in screen pixels, so it is sized up
+   rather than zoomed (zoom would scale its left/top too). */
+#drag-stack { width: calc(44px * var(--ui-scale)); height: calc(44px * var(--ui-scale)); }
+
+@media (prefers-reduced-motion: reduce) {
+  #hurt-flash { transition: none !important; }
+  .toast { animation: none !important; }
+}

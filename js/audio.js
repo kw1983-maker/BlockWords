@@ -7,7 +7,7 @@ let musicGain = null;
 let noiseBuffer = null;
 let started = false;
 
-export const Audio = {
+export const AudioEngine = {
   enabled: true,
   musicEnabled: true,
 };
@@ -39,7 +39,7 @@ export function resumeAudio() {
 function now() { return ctx ? ctx.currentTime : 0; }
 
 function tone(freq, dur, type = 'sine', vol = 0.2, slideTo = null, delay = 0) {
-  if (!ctx || !Audio.enabled) return;
+  if (!ctx || !AudioEngine.enabled) return;
   const t = now() + delay;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
@@ -54,7 +54,7 @@ function tone(freq, dur, type = 'sine', vol = 0.2, slideTo = null, delay = 0) {
 }
 
 function noise(dur, vol = 0.2, filterFreq = 1200, q = 1, delay = 0, type = 'bandpass') {
-  if (!ctx || !Audio.enabled) return;
+  if (!ctx || !AudioEngine.enabled) return;
   const t = now() + delay;
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffer;
@@ -140,10 +140,10 @@ let musicTimer = null;
 
 export function startMusic() {
   if (!ctx || musicTimer) return;
-  musicGain.gain.setTargetAtTime(Audio.musicEnabled ? 0.16 : 0, now(), 1.5);
+  musicGain.gain.setTargetAtTime(AudioEngine.musicEnabled ? 0.16 : 0, now(), 1.5);
 
   const playNote = () => {
-    if (!ctx || !Audio.musicEnabled) return;
+    if (!ctx || !AudioEngine.musicEnabled) return;
     const root = 220;
     const semi = SCALE[Math.floor(Math.random() * SCALE.length)];
     const f = root * Math.pow(2, semi / 12);
@@ -177,7 +177,7 @@ export function startMusic() {
 }
 
 export function setMusicEnabled(on) {
-  Audio.musicEnabled = on;
+  AudioEngine.musicEnabled = on;
   if (musicGain && ctx) musicGain.gain.setTargetAtTime(on ? 0.16 : 0, now(), 0.8);
 }
 

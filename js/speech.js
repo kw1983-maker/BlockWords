@@ -17,6 +17,8 @@ export const Speech = {
   _lastAt: 0,
   _queue: Promise.resolve(),
   _audio: null,
+  _gen: 0,          // bumped on every cancel; queued lines from an older gen are dropped
+  _release: null,   // resolves whatever line is playing right now
 };
 
 const _blobCache = new Map();
@@ -80,6 +82,7 @@ function pickVoice() {
 }
 
 function stopNarrativeAudio() {
+  Speech._gen++;
   if (Speech._audio) {
     try {
       Speech._audio.pause();
@@ -87,6 +90,8 @@ function stopNarrativeAudio() {
     } catch (e) { /* ignore */ }
     Speech._audio = null;
   }
+  // A paused clip never fires "ended"; let its queue slot go.
+  if (Speech._release) { Speech._release(); Speech._release = null; }
   Speech._queue = Promise.resolve();
 }
 
@@ -129,21 +134,22 @@ async function fetchNarrativeAudio(text) {
   return url;
 }
 
+// Every line — recorded clip or browser voice — waits for the one before it,
+// so a villager's name and sentence never talk over each other.
 function queueNarrative(text, opts = {}, wantsLive = true) {
+  const gen = Speech._gen;
   Speech._queue = Speech._queue.then(async () => {
-    if (!Speech.enabled) return;
+    if (!Speech.enabled || gen !== Speech._gen) return;
+    let url = null;
     try {
-      const url = await narrativeAudioUrl(text, wantsLive);
-      if (!url) throw new Error('no narrative audio');
-      await playNarrativeAudio(url, opts);
+      url = await narrativeAudioUrl(text, wantsLive);
     } catch (e) {
-      if (!wantsLive) {
-        sayBrowser(text, opts);
-        return;
-      }
       console.warn('[speech] Narrative fallback to browser voice:', e.message || e);
-      sayBrowser(text, opts);
     }
+    if (gen !== Speech._gen) return;
+    if (url && await playNarrativeAudio(url, opts)) return;
+    if (gen !== Speech._gen) return;
+    await sayBrowser(text, opts);
   });
 }
 
@@ -155,40 +161,58 @@ async function narrativeAudioUrl(text, wantsLive = true) {
   return null;
 }
 
+// Resolves true once the clip has played, false if it could not play (so the
+// caller can fall back to the browser voice).
 function playNarrativeAudio(url, opts = {}) {
   return new Promise((resolve) => {
     resumeAudio();
-    const audio = new Audio(url);
+    const audio = new window.Audio(url);
     Speech._audio = audio;
     audio.volume = opts.volume === undefined ? 1 : opts.volume;
-    const done = () => {
+    const finish = (ok) => {
       if (Speech._audio === audio) Speech._audio = null;
-      resolve();
+      if (Speech._release === release) Speech._release = null;
+      resolve(ok);
     };
+    const release = () => finish(true);
+    Speech._release = release;
     audio.onended = () => {
       if (opts.onEnd) opts.onEnd();
-      done();
+      finish(true);
     };
-    audio.onerror = done;
-    audio.play().catch(done);
+    audio.onerror = () => finish(false);
+    audio.play().catch(() => finish(false));
   });
 }
 
+// Resolves when the utterance ends. Some browsers never fire "end", so a
+// length-based timeout stops one lost event from stalling the whole queue.
 function sayBrowser(text, opts = {}) {
-  if (!Speech.supported) return;
-  try {
-    if (!opts.queue) window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    if (Speech.voice) u.voice = Speech.voice;
-    u.lang = (Speech.voice && Speech.voice.lang) || 'en-GB';
-    u.rate = opts.rate || Speech.rate;
-    u.pitch = opts.pitch || 1.05;
-    u.volume = opts.volume === undefined ? 1 : opts.volume;
-    if (opts.onEnd) u.onend = opts.onEnd;
-    window.speechSynthesis.speak(u);
-  } catch (e) {
-    // A browser with speech disabled must never take the game down with it.
-  }
+  if (!Speech.supported) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = () => {
+      clearTimeout(timer);
+      if (Speech._release === finish) Speech._release = null;
+      resolve();
+    };
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      if (Speech.voice) u.voice = Speech.voice;
+      u.lang = (Speech.voice && Speech.voice.lang) || 'en-GB';
+      u.rate = opts.rate || Speech.rate;
+      u.pitch = opts.pitch || 1.05;
+      u.volume = opts.volume === undefined ? 1 : opts.volume;
+      u.onend = () => { if (opts.onEnd) opts.onEnd(); finish(); };
+      u.onerror = finish;
+      Speech._release = finish;
+      timer = setTimeout(finish, 2500 + text.length * 120);
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      // A browser with speech disabled must never take the game down with it.
+      finish();
+    }
+  });
 }
 
 export function initSpeech() {
@@ -221,10 +245,7 @@ export function say(text, opts = {}) {
   }
 
   // Short labels — pre-recorded vocabulary if available, else browser TTS.
-  if (!opts.queue) {
-    stopNarrativeAudio();
-    window.speechSynthesis.cancel();
-  }
+  if (!opts.queue) cancelSpeech();
   queueNarrative(t, opts, false);
 }
 
@@ -242,8 +263,7 @@ export function sayLines(lines, opts = {}) {
     return;
   }
 
-  if (!Speech.supported) return;
-  window.speechSynthesis.cancel();
+  cancelSpeech();
   parts.forEach((line, i) => {
     say(line, Object.assign({}, opts, { queue: true, force: true, narrative: false }));
   });

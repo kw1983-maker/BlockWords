@@ -4,6 +4,10 @@
 # Firebase config with project keys (copy from firebase-config.example.js)
 js/firebase-config.js
 js/elevenlabs-config.js
+js/teacher-config.js
+
+# Generated bundle — built by build.py (Vercel builds on deploy)
+index.html
 
 # Python
 __pycache__/

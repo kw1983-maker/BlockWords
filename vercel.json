@@ -1,5 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "python build.py",
-  "outputDirectory": "."
+  "buildCommand": "BLOCKWORDS_PROD=1 python build.py --prod",
+  "outputDirectory": ".",
+  "headers": [
+    {
+      "source": "/audio/speech/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
 }

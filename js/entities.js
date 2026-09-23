@@ -211,7 +211,7 @@ export const MOB_TYPES = {
 };
 
 export class Mob {
-  constructor(type, x, y, z, seedVal) {
+  constructor(type, x, y, z, seedVal, colourName) {
     const def = MOB_TYPES[type];
     this.type = type;
     this.def = def;
@@ -227,9 +227,13 @@ export class Mob {
     this.walkPhase = 0;
 
     // Sheep come in colours, which is how the colour words get into the world.
+    // Half are white; the other half spread evenly over every other colour.
     if (def.coloured) {
       const r = mulberry32(seedVal || (Math.random() * 1e9) | 0)();
-      const i = r < 0.5 ? 0 : 1 + Math.floor(r * (WOOL_COLOURS.length - 1)) % (WOOL_COLOURS.length - 1);
+      const n = WOOL_COLOURS.length - 1;
+      let i = r < 0.5 ? 0 : 1 + Math.min(n - 1, Math.floor((r - 0.5) * 2 * n));
+      const forced = colourName ? WOOL_COLOURS.findIndex((c) => c[0] === colourName) : -1;
+      if (forced >= 0) i = forced;
       this.colourName = WOOL_COLOURS[i][0];
       this.colour = WOOL_COLOURS[i][1];
     }
@@ -429,8 +433,8 @@ export class Entities {
     this.scene.add(e.object);
   }
 
-  spawnMob(type, x, y, z, seedVal) {
-    const m = new Mob(type, x, y, z, seedVal);
+  spawnMob(type, x, y, z, seedVal, colourName) {
+    const m = new Mob(type, x, y, z, seedVal, colourName);
     this.mobs.push(m);
     this.scene.add(m.object);
     return m;
@@ -460,8 +464,12 @@ export class Entities {
     if (this.spawnTimer > 0) return;
     this.spawnTimer = 3;
     const near = this.mobs.filter((m) => Math.abs(m.pos.x - px) < 60 && Math.abs(m.pos.z - pz) < 60);
-    if (near.length >= 14) return;
     const types = ['pig', 'cow', 'sheep', 'sheep', 'chicken', 'rabbit', 'cat', 'wolf'];
+    // An open "find" quest must always be possible: if nothing it asks for is
+    // around, the next spawn is exactly that animal (and colour).
+    const missing = (this.wanted || []).find((w) => !near.some((m) =>
+      m.type === w.type && (!w.colour || m.colourName === w.colour)));
+    if (near.length >= 14 && !missing) return;
     for (let tries = 0; tries < 8; tries++) {
       const ang = Math.random() * Math.PI * 2;
       const dist = 18 + Math.random() * 34;
@@ -473,8 +481,8 @@ export class Entities {
       const ground = this.world.getBlock(x, top, z);
       if (ground !== B.GRASS_BLOCK && ground !== B.SNOW_BLOCK) continue;
       if (this.world.getBlock(x, top + 1, z) !== B.AIR) continue;
-      const type = types[Math.floor(Math.random() * types.length)];
-      this.spawnMob(type, x + 0.5, top + 1, z + 0.5, (Math.random() * 1e9) | 0);
+      const type = missing ? missing.type : types[Math.floor(Math.random() * types.length)];
+      this.spawnMob(type, x + 0.5, top + 1, z + 0.5, (Math.random() * 1e9) | 0, missing && missing.colour);
       return;
     }
   }

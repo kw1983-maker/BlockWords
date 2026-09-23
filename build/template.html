@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BlockWords — Minecraft-style English Adventure</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.92em' font-size='92'>&#129001;</text></svg>" />
-  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
   <script type="importmap">
   {
     "imports": {
@@ -31,13 +29,14 @@
     <div id="hearts" class="bar-row"></div>
     <div id="hunger" class="bar-row"></div>
   </div>
+  <div id="emeralds" class="emeralds hidden" title="Emeralds from villagers"></div>
   <div id="hotbar"></div>
 </div>
 
 <div id="hint-bar" class="hidden"></div>
 
 <!-- Advancement / toast popups -->
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
 <!-- F3 debug overlay -->
 <pre id="debug" class="hidden"></pre>
@@ -65,11 +64,27 @@
     <div id="pack-picker" class="pack-picker"></div>
 
     <div class="title-row">
+      <label for="class-input">Class code <span class="optional">(optional)</span></label>
+      <input id="class-input" type="text" placeholder="e.g. 4A" maxlength="16" autocomplete="off" />
+    </div>
+
+    <div class="title-row">
       <label><input type="checkbox" id="opt-speech" checked /> Read English aloud 🔊</label>
+    </div>
+
+    <div class="title-row">
+      <label for="opt-ui-scale">Screen size</label>
+      <select id="opt-ui-scale">
+        <option value="1">Normal</option>
+        <option value="1.15">Large (projector)</option>
+        <option value="1.3">Extra large</option>
+      </select>
     </div>
 
     <button id="btn-play" class="btn-big">Play</button>
     <button id="btn-continue" class="btn-small hidden">Continue saved world</button>
+    <p id="continue-info" class="continue-info hidden"></p>
+    <button id="btn-teacher" class="btn-small btn-teacher">Teacher</button>
 
     <details class="controls-help">
       <summary>Controls</summary>
@@ -108,6 +123,7 @@
     <label class="pause-opt"><input type="checkbox" id="opt-speech2" checked /> Read English aloud 🔊</label>
     <label class="pause-opt"><input type="checkbox" id="opt-music" checked /> Music 🎵</label>
     <label class="pause-opt">Render distance <input id="opt-dist" type="range" min="3" max="10" value="6" /> <span id="dist-val">6</span></label>
+    <button id="btn-wordbook" class="btn-small">Word Book (B)</button>
     <button id="btn-quit" class="btn-small">Save &amp; Quit to Title</button>
   </div>
 </div>
@@ -125,7 +141,7 @@
 </div>
 
 <!-- Villager quest dialog -->
-<div id="quest-screen" class="overlay hidden">
+<div id="quest-screen" class="overlay hidden" role="dialog" aria-labelledby="quest-name" aria-live="polite">
   <div class="panel quest-panel">
     <div class="quest-head">
       <span class="quest-villager">🧑‍🌾</span>
@@ -153,6 +169,33 @@
     <button id="sign-ok" class="btn-big">OK</button>
     <button id="sign-cancel" class="btn-small">Cancel</button>
   </div>
+</div>
+
+<!-- Word Book — pack vocabulary and progress -->
+<div id="wordbook-screen" class="overlay hidden" role="dialog" aria-labelledby="wordbook-title">
+  <div class="panel wordbook-panel">
+    <h2 id="wordbook-title" class="panel-title">Word Book</h2>
+    <p id="wordbook-progress" class="wordbook-progress"></p>
+    <div id="wordbook-grid" class="wordbook-grid"></div>
+    <button id="wordbook-close" class="btn-big">Close</button>
+  </div>
+</div>
+
+<!-- Teacher export -->
+<div id="teacher-screen" class="overlay hidden" role="dialog" aria-labelledby="teacher-title">
+  <div class="panel teacher-panel">
+    <h2 id="teacher-title" class="panel-title">Teacher</h2>
+    <p class="teacher-help">Enter the teacher PIN to export pupil progress as CSV.</p>
+    <input id="teacher-pin" class="sign-input" type="password" maxlength="16" autocomplete="off" placeholder="PIN" />
+    <input id="teacher-class-filter" class="sign-input teacher-filter" type="text" maxlength="16" autocomplete="off" placeholder="Class code filter (optional)" />
+    <button id="teacher-export" class="btn-big">Download CSV</button>
+    <p id="teacher-status" class="teacher-status"></p>
+    <button id="teacher-close" class="btn-small">Close</button>
+  </div>
+</div>
+
+<div id="tutorial-hint" class="tutorial-hint hidden" aria-live="polite">
+  Walk to a villager with <b>!</b> and right-click to hear the job.
 </div>
 
 <script type="module">

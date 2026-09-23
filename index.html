@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BlockWords — Minecraft-style English Adventure</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.92em' font-size='92'>&#129001;</text></svg>" />
-  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
   <script type="importmap">
   {
     "imports": {
@@ -102,6 +100,14 @@ kbd {
   justify-content: space-between;
 }
 .bar-row { display: flex; gap: 1px; }
+.emeralds {
+  position: absolute;
+  right: calc(50% - 300px);
+  bottom: 14px;
+  font: bold 20px/1 'Trebuchet MS', sans-serif;
+  text-shadow: 2px 2px 0 #000;
+}
+@media (max-width: 640px) { .emeralds { position: static; } }
 .pip {
   width: 18px; height: 18px;
   background-size: contain;
@@ -169,7 +175,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 7;
+  z-index: 20;   /* above every overlay, so title-screen messages show too */
   pointer-events: none;
 }
 .toast {
@@ -396,6 +402,7 @@ kbd {
 .quest-progress .ok { color: #6ede7a; }
 .quest-buttons { display: flex; flex-direction: column; gap: 4px; }
 .quest-reward { font-size: 17px; margin: 8px 0; }
+.quest-hint { display: inline-block; margin-top: 6px; font-size: 16px; opacity: .8; }
 
 /* ------------------------------------------------------- damage & death */
 #hurt-flash {
@@ -440,6 +447,81 @@ kbd {
 }
 .sign-suggest button:hover { background: #45454f; }
 
+/* ------------------------------------------------------------- word book */
+.wordbook-panel { max-width: 620px; }
+.wordbook-progress { font-size: 18px; margin: 0 0 12px; opacity: .9; }
+.wordbook-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+.wordbook-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  background: #2a2a34;
+  border: 3px solid #14141a;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #fff;
+  opacity: .55;
+}
+.wordbook-card.learned { opacity: 1; border-color: #6ede7a; }
+.wordbook-card:hover { background: #38384a; }
+.wb-emoji { font-size: 32px; line-height: 1; }
+.wb-word { font-size: 14px; font-weight: bold; text-transform: capitalize; }
+
+/* --------------------------------------------------------------- teacher */
+.teacher-panel { max-width: 440px; }
+.teacher-help { font-size: 15px; opacity: .85; margin: 0 0 12px; }
+.teacher-filter { margin-top: 8px; font-size: 18px; }
+.teacher-status { font-size: 15px; min-height: 1.2em; margin: 10px 0; opacity: .9; }
+.btn-teacher { margin-top: 8px; opacity: .85; }
+.continue-info { margin: -4px 0 8px; font-size: 14px; opacity: .8; }
+.btn-big.armed { background: #b5542f; box-shadow: 0 0 0 2px #e08a62 inset, 0 5px 0 #6e2f17; }
+.optional { font-size: 12px; opacity: .65; font-weight: normal; }
+
+/* ------------------------------------------------------------- tutorial */
+.tutorial-hint {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92vw;
+  padding: 12px 18px;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+  color: #fff;
+  background: rgba(20, 20, 30, .88);
+  border: 3px solid #ffd23f;
+  border-radius: 8px;
+  z-index: 9;   /* below the overlays, so it never covers a dialog */
+  text-shadow: 2px 2px 0 #000;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------- UI scale */
+/* "Screen size" enlarges the 2D interface only. The 3D canvas must never be
+   scaled, or the crosshair stops lining up with the block being mined. */
+:root { --ui-scale: 1; }
+.overlay > .panel, #hud, #hint-bar, #toasts, .tutorial-hint {
+  zoom: var(--ui-scale);
+}
+/* The dragged stack follows the mouse in screen pixels, so it is sized up
+   rather than zoomed (zoom would scale its left/top too). */
+#drag-stack { width: calc(44px * var(--ui-scale)); height: calc(44px * var(--ui-scale)); }
+
+@media (prefers-reduced-motion: reduce) {
+  #hurt-flash { transition: none !important; }
+  .toast { animation: none !important; }
+}
+
   </style>
 </head>
 <body>
@@ -455,13 +537,14 @@ kbd {
     <div id="hearts" class="bar-row"></div>
     <div id="hunger" class="bar-row"></div>
   </div>
+  <div id="emeralds" class="emeralds hidden" title="Emeralds from villagers"></div>
   <div id="hotbar"></div>
 </div>
 
 <div id="hint-bar" class="hidden"></div>
 
 <!-- Advancement / toast popups -->
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
 <!-- F3 debug overlay -->
 <pre id="debug" class="hidden"></pre>
@@ -489,11 +572,27 @@ kbd {
     <div id="pack-picker" class="pack-picker"></div>
 
     <div class="title-row">
+      <label for="class-input">Class code <span class="optional">(optional)</span></label>
+      <input id="class-input" type="text" placeholder="e.g. 4A" maxlength="16" autocomplete="off" />
+    </div>
+
+    <div class="title-row">
       <label><input type="checkbox" id="opt-speech" checked /> Read English aloud 🔊</label>
+    </div>
+
+    <div class="title-row">
+      <label for="opt-ui-scale">Screen size</label>
+      <select id="opt-ui-scale">
+        <option value="1">Normal</option>
+        <option value="1.15">Large (projector)</option>
+        <option value="1.3">Extra large</option>
+      </select>
     </div>
 
     <button id="btn-play" class="btn-big">Play</button>
     <button id="btn-continue" class="btn-small hidden">Continue saved world</button>
+    <p id="continue-info" class="continue-info hidden"></p>
+    <button id="btn-teacher" class="btn-small btn-teacher">Teacher</button>
 
     <details class="controls-help">
       <summary>Controls</summary>
@@ -532,6 +631,7 @@ kbd {
     <label class="pause-opt"><input type="checkbox" id="opt-speech2" checked /> Read English aloud 🔊</label>
     <label class="pause-opt"><input type="checkbox" id="opt-music" checked /> Music 🎵</label>
     <label class="pause-opt">Render distance <input id="opt-dist" type="range" min="3" max="10" value="6" /> <span id="dist-val">6</span></label>
+    <button id="btn-wordbook" class="btn-small">Word Book (B)</button>
     <button id="btn-quit" class="btn-small">Save &amp; Quit to Title</button>
   </div>
 </div>
@@ -549,7 +649,7 @@ kbd {
 </div>
 
 <!-- Villager quest dialog -->
-<div id="quest-screen" class="overlay hidden">
+<div id="quest-screen" class="overlay hidden" role="dialog" aria-labelledby="quest-name" aria-live="polite">
   <div class="panel quest-panel">
     <div class="quest-head">
       <span class="quest-villager">🧑‍🌾</span>
@@ -577,6 +677,33 @@ kbd {
     <button id="sign-ok" class="btn-big">OK</button>
     <button id="sign-cancel" class="btn-small">Cancel</button>
   </div>
+</div>
+
+<!-- Word Book — pack vocabulary and progress -->
+<div id="wordbook-screen" class="overlay hidden" role="dialog" aria-labelledby="wordbook-title">
+  <div class="panel wordbook-panel">
+    <h2 id="wordbook-title" class="panel-title">Word Book</h2>
+    <p id="wordbook-progress" class="wordbook-progress"></p>
+    <div id="wordbook-grid" class="wordbook-grid"></div>
+    <button id="wordbook-close" class="btn-big">Close</button>
+  </div>
+</div>
+
+<!-- Teacher export -->
+<div id="teacher-screen" class="overlay hidden" role="dialog" aria-labelledby="teacher-title">
+  <div class="panel teacher-panel">
+    <h2 id="teacher-title" class="panel-title">Teacher</h2>
+    <p class="teacher-help">Enter the teacher PIN to export pupil progress as CSV.</p>
+    <input id="teacher-pin" class="sign-input" type="password" maxlength="16" autocomplete="off" placeholder="PIN" />
+    <input id="teacher-class-filter" class="sign-input teacher-filter" type="text" maxlength="16" autocomplete="off" placeholder="Class code filter (optional)" />
+    <button id="teacher-export" class="btn-big">Download CSV</button>
+    <p id="teacher-status" class="teacher-status"></p>
+    <button id="teacher-close" class="btn-small">Close</button>
+  </div>
+</div>
+
+<div id="tutorial-hint" class="tutorial-hint hidden" aria-live="polite">
+  Walk to a villager with <b>!</b> and right-click to hear the job.
 </div>
 
 <script type="module">
@@ -3371,7 +3498,7 @@ const MOB_TYPES = {
 };
 
 class Mob {
-  constructor(type, x, y, z, seedVal) {
+  constructor(type, x, y, z, seedVal, colourName) {
     const def = MOB_TYPES[type];
     this.type = type;
     this.def = def;
@@ -3387,9 +3514,13 @@ class Mob {
     this.walkPhase = 0;
 
     // Sheep come in colours, which is how the colour words get into the world.
+    // Half are white; the other half spread evenly over every other colour.
     if (def.coloured) {
       const r = mulberry32(seedVal || (Math.random() * 1e9) | 0)();
-      const i = r < 0.5 ? 0 : 1 + Math.floor(r * (WOOL_COLOURS.length - 1)) % (WOOL_COLOURS.length - 1);
+      const n = WOOL_COLOURS.length - 1;
+      let i = r < 0.5 ? 0 : 1 + Math.min(n - 1, Math.floor((r - 0.5) * 2 * n));
+      const forced = colourName ? WOOL_COLOURS.findIndex((c) => c[0] === colourName) : -1;
+      if (forced >= 0) i = forced;
       this.colourName = WOOL_COLOURS[i][0];
       this.colour = WOOL_COLOURS[i][1];
     }
@@ -3589,8 +3720,8 @@ class Entities {
     this.scene.add(e.object);
   }
 
-  spawnMob(type, x, y, z, seedVal) {
-    const m = new Mob(type, x, y, z, seedVal);
+  spawnMob(type, x, y, z, seedVal, colourName) {
+    const m = new Mob(type, x, y, z, seedVal, colourName);
     this.mobs.push(m);
     this.scene.add(m.object);
     return m;
@@ -3620,8 +3751,12 @@ class Entities {
     if (this.spawnTimer > 0) return;
     this.spawnTimer = 3;
     const near = this.mobs.filter((m) => Math.abs(m.pos.x - px) < 60 && Math.abs(m.pos.z - pz) < 60);
-    if (near.length >= 14) return;
     const types = ['pig', 'cow', 'sheep', 'sheep', 'chicken', 'rabbit', 'cat', 'wolf'];
+    // An open "find" quest must always be possible: if nothing it asks for is
+    // around, the next spawn is exactly that animal (and colour).
+    const missing = (this.wanted || []).find((w) => !near.some((m) =>
+      m.type === w.type && (!w.colour || m.colourName === w.colour)));
+    if (near.length >= 14 && !missing) return;
     for (let tries = 0; tries < 8; tries++) {
       const ang = Math.random() * Math.PI * 2;
       const dist = 18 + Math.random() * 34;
@@ -3633,8 +3768,8 @@ class Entities {
       const ground = this.world.getBlock(x, top, z);
       if (ground !== B.GRASS_BLOCK && ground !== B.SNOW_BLOCK) continue;
       if (this.world.getBlock(x, top + 1, z) !== B.AIR) continue;
-      const type = types[Math.floor(Math.random() * types.length)];
-      this.spawnMob(type, x + 0.5, top + 1, z + 0.5, (Math.random() * 1e9) | 0);
+      const type = missing ? missing.type : types[Math.floor(Math.random() * types.length)];
+      this.spawnMob(type, x + 0.5, top + 1, z + 0.5, (Math.random() * 1e9) | 0, missing && missing.colour);
       return;
     }
   }
@@ -3878,7 +4013,7 @@ let musicGain = null;
 let noiseBuffer = null;
 let started = false;
 
-const Audio = {
+const AudioEngine = {
   enabled: true,
   musicEnabled: true,
 };
@@ -3910,7 +4045,7 @@ function resumeAudio() {
 function now() { return ctx ? ctx.currentTime : 0; }
 
 function tone(freq, dur, type = 'sine', vol = 0.2, slideTo = null, delay = 0) {
-  if (!ctx || !Audio.enabled) return;
+  if (!ctx || !AudioEngine.enabled) return;
   const t = now() + delay;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
@@ -3925,7 +4060,7 @@ function tone(freq, dur, type = 'sine', vol = 0.2, slideTo = null, delay = 0) {
 }
 
 function noise(dur, vol = 0.2, filterFreq = 1200, q = 1, delay = 0, type = 'bandpass') {
-  if (!ctx || !Audio.enabled) return;
+  if (!ctx || !AudioEngine.enabled) return;
   const t = now() + delay;
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffer;
@@ -4011,10 +4146,10 @@ let musicTimer = null;
 
 function startMusic() {
   if (!ctx || musicTimer) return;
-  musicGain.gain.setTargetAtTime(Audio.musicEnabled ? 0.16 : 0, now(), 1.5);
+  musicGain.gain.setTargetAtTime(AudioEngine.musicEnabled ? 0.16 : 0, now(), 1.5);
 
   const playNote = () => {
-    if (!ctx || !Audio.musicEnabled) return;
+    if (!ctx || !AudioEngine.musicEnabled) return;
     const root = 220;
     const semi = SCALE[Math.floor(Math.random() * SCALE.length)];
     const f = root * Math.pow(2, semi / 12);
@@ -4048,7 +4183,7 @@ function startMusic() {
 }
 
 function setMusicEnabled(on) {
-  Audio.musicEnabled = on;
+  AudioEngine.musicEnabled = on;
   if (musicGain && ctx) musicGain.gain.setTargetAtTime(on ? 0.16 : 0, now(), 0.8);
 }
 
@@ -4056,32 +4191,6 @@ function stopMusic() {
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
   if (musicGain && ctx) musicGain.gain.setTargetAtTime(0, now(), 0.5);
 }
-
-// ===== js/elevenlabs-config.js =====
-// Copy this file to elevenlabs-config.js and add your ElevenLabs API key.
-// elevenlabs-config.js is gitignored — never commit real keys to the repo.
-//
-// Get a key: https://elevenlabs.io → Profile → API Keys
-// Browse voices: use the ElevenLabs MCP in Cursor, or the Voice Library on the site.
-
-const ELEVENLABS_CONFIG = {
-  apiKey: 'sk_de0808d27cdc5f53e76ec851843e45f3671f255723a3496d',
-
-  // Alice — clear, warm British English. Good for Year 1–4 pupils.
-  voiceId: 'Xb7hH8MSUJpSbSDYk0k2',
-  voiceName: 'Alice',
-
-  // Fast model for in-game prompts; switch to eleven_multilingual_v2 for richer tone.
-  modelId: 'eleven_turbo_v2_5',
-
-  // Slightly expressive, steady pace — less robotic than browser TTS.
-  voiceSettings: {
-    stability: 0.55,
-    similarity_boost: 0.82,
-    style: 0.38,
-    use_speaker_boost: true,
-  },
-};
 
 // ===== js/speech.js =====
 // Text-to-speech. Year 1 and 2 pupils largely cannot read the English in the
@@ -4102,6 +4211,8 @@ const Speech = {
   _lastAt: 0,
   _queue: Promise.resolve(),
   _audio: null,
+  _gen: 0,          // bumped on every cancel; queued lines from an older gen are dropped
+  _release: null,   // resolves whatever line is playing right now
 };
 
 const _blobCache = new Map();
@@ -4165,6 +4276,7 @@ function pickVoice() {
 }
 
 function stopNarrativeAudio() {
+  Speech._gen++;
   if (Speech._audio) {
     try {
       Speech._audio.pause();
@@ -4172,6 +4284,8 @@ function stopNarrativeAudio() {
     } catch (e) { /* ignore */ }
     Speech._audio = null;
   }
+  // A paused clip never fires "ended"; let its queue slot go.
+  if (Speech._release) { Speech._release(); Speech._release = null; }
   Speech._queue = Promise.resolve();
 }
 
@@ -4214,21 +4328,22 @@ async function fetchNarrativeAudio(text) {
   return url;
 }
 
+// Every line — recorded clip or browser voice — waits for the one before it,
+// so a villager's name and sentence never talk over each other.
 function queueNarrative(text, opts = {}, wantsLive = true) {
+  const gen = Speech._gen;
   Speech._queue = Speech._queue.then(async () => {
-    if (!Speech.enabled) return;
+    if (!Speech.enabled || gen !== Speech._gen) return;
+    let url = null;
     try {
-      const url = await narrativeAudioUrl(text, wantsLive);
-      if (!url) throw new Error('no narrative audio');
-      await playNarrativeAudio(url, opts);
+      url = await narrativeAudioUrl(text, wantsLive);
     } catch (e) {
-      if (!wantsLive) {
-        sayBrowser(text, opts);
-        return;
-      }
       console.warn('[speech] Narrative fallback to browser voice:', e.message || e);
-      sayBrowser(text, opts);
     }
+    if (gen !== Speech._gen) return;
+    if (url && await playNarrativeAudio(url, opts)) return;
+    if (gen !== Speech._gen) return;
+    await sayBrowser(text, opts);
   });
 }
 
@@ -4240,40 +4355,58 @@ async function narrativeAudioUrl(text, wantsLive = true) {
   return null;
 }
 
+// Resolves true once the clip has played, false if it could not play (so the
+// caller can fall back to the browser voice).
 function playNarrativeAudio(url, opts = {}) {
   return new Promise((resolve) => {
     resumeAudio();
-    const audio = new Audio(url);
+    const audio = new window.Audio(url);
     Speech._audio = audio;
     audio.volume = opts.volume === undefined ? 1 : opts.volume;
-    const done = () => {
+    const finish = (ok) => {
       if (Speech._audio === audio) Speech._audio = null;
-      resolve();
+      if (Speech._release === release) Speech._release = null;
+      resolve(ok);
     };
+    const release = () => finish(true);
+    Speech._release = release;
     audio.onended = () => {
       if (opts.onEnd) opts.onEnd();
-      done();
+      finish(true);
     };
-    audio.onerror = done;
-    audio.play().catch(done);
+    audio.onerror = () => finish(false);
+    audio.play().catch(() => finish(false));
   });
 }
 
+// Resolves when the utterance ends. Some browsers never fire "end", so a
+// length-based timeout stops one lost event from stalling the whole queue.
 function sayBrowser(text, opts = {}) {
-  if (!Speech.supported) return;
-  try {
-    if (!opts.queue) window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    if (Speech.voice) u.voice = Speech.voice;
-    u.lang = (Speech.voice && Speech.voice.lang) || 'en-GB';
-    u.rate = opts.rate || Speech.rate;
-    u.pitch = opts.pitch || 1.05;
-    u.volume = opts.volume === undefined ? 1 : opts.volume;
-    if (opts.onEnd) u.onend = opts.onEnd;
-    window.speechSynthesis.speak(u);
-  } catch (e) {
-    // A browser with speech disabled must never take the game down with it.
-  }
+  if (!Speech.supported) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = () => {
+      clearTimeout(timer);
+      if (Speech._release === finish) Speech._release = null;
+      resolve();
+    };
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      if (Speech.voice) u.voice = Speech.voice;
+      u.lang = (Speech.voice && Speech.voice.lang) || 'en-GB';
+      u.rate = opts.rate || Speech.rate;
+      u.pitch = opts.pitch || 1.05;
+      u.volume = opts.volume === undefined ? 1 : opts.volume;
+      u.onend = () => { if (opts.onEnd) opts.onEnd(); finish(); };
+      u.onerror = finish;
+      Speech._release = finish;
+      timer = setTimeout(finish, 2500 + text.length * 120);
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      // A browser with speech disabled must never take the game down with it.
+      finish();
+    }
+  });
 }
 
 function initSpeech() {
@@ -4306,10 +4439,7 @@ function say(text, opts = {}) {
   }
 
   // Short labels — pre-recorded vocabulary if available, else browser TTS.
-  if (!opts.queue) {
-    stopNarrativeAudio();
-    window.speechSynthesis.cancel();
-  }
+  if (!opts.queue) cancelSpeech();
   queueNarrative(t, opts, false);
 }
 
@@ -4327,8 +4457,7 @@ function sayLines(lines, opts = {}) {
     return;
   }
 
-  if (!Speech.supported) return;
-  window.speechSynthesis.cancel();
+  cancelSpeech();
   parts.forEach((line, i) => {
     say(line, Object.assign({}, opts, { queue: true, force: true, narrative: false }));
   });
@@ -4354,7 +4483,7 @@ function setSpeechEnabled(on) {
 // Everything the villagers ask for is generated from this file, so adding a
 // word here immediately creates new quests. There are two tables:
 //
-//   YEARS  — one entry per school year (1, 2, 4). A year decides HOW a villager
+//   YEARS  — one entry per school year (1, 2, 3, 4). A year decides HOW a villager
 //            speaks: the sentence templates, and how many things it asks for.
 //   PACKS  — one entry per topic. A pack decides WHAT the villager talks about,
 //            and which years it is offered to.
@@ -4419,11 +4548,17 @@ function setSpeechEnabled(on) {
 //   {it}        "it" for one, "them" for more than one
 //   {name}      the villager's name
 //
+// Besides fetch / fetchU / find / place / visit, a year's `lines` may also
+// override the shared feedback lines in COMMON_LINES: found, visited, goBack
+// and eat. `hints` is the one-line reminder shown in the villager's dialog, and
+// `praise` is what the villager says when the job is done.
+//
 // A template that already contains {sentence} is not followed by the model
 // sentence a second time.
 //
 // The books these packs follow:
 //   Year 1 & 2 — Super Minds 1 (Cambridge), Starter + Units 1–9
+//   Year 3     — Get Smart Plus 3 (MM Publications)
 //   Year 4     — Get Smart Plus 4 (MM Publications / KPM 2019), Modules 1–10
 // Both PDFs sit in the project root.
 //
@@ -4436,6 +4571,15 @@ function setSpeechEnabled(on) {
 // grammar Get Smart Plus 4 actually drills — some/any, how many/how much,
 // should, the past simple and comparatives.
 
+// Lines every year shares unless it writes its own under `lines` (same keys).
+// Used for the feedback around an errand rather than the errand itself.
+const COMMON_LINES = {
+  found: ['You found a {mob}!'],          // a "find" errand is done
+  visited: ['You found the {word}!'],     // a "visit" errand is done
+  goBack: ['Go back to {name}.'],         // …and where to go next
+  eat: ['Yum! {word}.'],                  // eating something
+};
+
 const YEARS = [
   {
     id: 1,
@@ -4443,7 +4587,7 @@ const YEARS = [
     emoji: '🐣',
     book: 'Super Minds 1 · Starter–Unit 4',
     blurb: 'short sentences, 1–3 things',
-    counts: { fetch: [1, 3], place: [1, 3] },
+    counts: { fetch: [1, 3], place: [1, 3], visit: [1, 1] },
     leadWord: true,          // say the bare word first, so they hear it clean
     lines: {
       fetch: [
@@ -4464,11 +4608,16 @@ const YEARS = [
         'Put {n} {what} next to me.',
         'Look at me. Put {n} {what} here, please.',
       ],
+      visit: [
+        'Look! Can you find the {word}?',
+        'Go to the {word}, please.',
+      ],
     },
     hints: {
       fetch: 'Find {n} {what}. Then come back to me.',
       find: 'Walk and look. Stand next to the {mob}.',
       place: 'Put {n} {what} on the ground next to me.',
+      visit: 'Go to the {word}. Stand there.',
     },
     praise: ['Well done!', 'Very good!', 'Thank you! Good job!'],
   },
@@ -4478,7 +4627,7 @@ const YEARS = [
     emoji: '🦉',
     book: 'Super Minds 1 · Units 5–9',
     blurb: 'there is / there are, 2–5 things',
-    counts: { fetch: [2, 5], place: [2, 6] },
+    counts: { fetch: [2, 5], place: [2, 6], visit: [1, 1] },
     leadWord: false,
     lines: {
       fetch: [
@@ -4500,11 +4649,16 @@ const YEARS = [
         'Where are the {many}? Put {n} {what} here, please.',
         "Let's build together. Put {n} {what} next to me.",
       ],
+      visit: [
+        "Where's the {word}? Go and find it!",
+        'Can you visit the {word}? Come back when you are there.',
+      ],
     },
     hints: {
       fetch: 'Find {n} {what} and bring {it} back to me.',
       find: 'Walk around and look. Stand next to the {mob}.',
       place: 'Put {n} {what} on the ground near me.',
+      visit: 'Walk to the {word} and stand there.',
     },
     praise: [
       'Well done! That was very good.',
@@ -4513,12 +4667,54 @@ const YEARS = [
     ],
   },
   {
+    id: 3,
+    label: 'Year 3',
+    emoji: '🌟',
+    book: 'Get Smart Plus 3',
+    blurb: 'describing places, 3–6 things',
+    counts: { fetch: [3, 6], place: [3, 8], visit: [1, 1] },
+    leadWord: false,
+    lines: {
+      fetch: [
+        'Please bring me {n} {what}. I need them for our lesson.',
+        'Can you find {n} {what}? Put them in my bag, please.',
+      ],
+      fetchU: [
+        'How much {word} do we need? About {n} {what}, please.',
+      ],
+      find: [
+        'Look for a {mob}. Tell me when you find one.',
+        'Is there a {mob} near here? Go and see!',
+      ],
+      place: [
+        'Put {n} {what} here, next to me.',
+        'We need {n} {what}. Place them on the ground, please.',
+      ],
+      visit: [
+        'Can you find the {word}? Go there and come back to me.',
+        'We are learning about {word}. Please visit the {word}.',
+        'Go to the {word}. Stand there, then come back.',
+      ],
+    },
+    hints: {
+      fetch: 'Find {n} {what} and bring {it} back.',
+      find: 'Walk around. Stand next to the {mob}.',
+      place: 'Put {n} {what} on the ground near me.',
+      visit: 'Go to the {word}. Stand there for a moment.',
+    },
+    praise: [
+      'Well done! Good exploring.',
+      'Thank you! You found it.',
+      'Great job! You are learning well.',
+    ],
+  },
+  {
     id: 4,
     label: 'Year 4',
     emoji: '🚀',
     book: 'Get Smart Plus 4',
     blurb: 'some / any, past simple, 4–10 things',
-    counts: { fetch: [4, 10], place: [5, 12] },
+    counts: { fetch: [4, 10], place: [5, 12], visit: [1, 1] },
     leadWord: false,
     lines: {
       fetch: [
@@ -4541,11 +4737,16 @@ const YEARS = [
         'We should build something together. Put {n} {what} next to me, please.',
         'How many {many} do we need? {n}, I think. Put them down here.',
       ],
+      visit: [
+        'We are learning about the {word}. Please go there and come back.',
+        'Can you find the {word}? Visit it, then tell me.',
+      ],
     },
     hints: {
       fetch: 'Collect {n} {what}, then bring {it} back to me.',
       find: 'Search around. Stand next to a {mob} to finish the job.',
       place: 'Place {n} {what} on the ground close to me.',
+      visit: 'Walk to the {word} and stand there for a moment.',
     },
     praise: [
       'Thank you! You helped me. That was very kind.',
@@ -4630,7 +4831,7 @@ const PACKS = [
       { word: 'box', emoji: '📦', sentence: 'My things are in the box.', item: 'chest', block: 'chest', one: 'box', many: 'boxes' },
       { word: 'lamp', emoji: '💡', sentence: 'The lamp is bright.', item: 'torch', block: 'torch', one: 'lamp', many: 'lamps' },
       { word: 'sign', emoji: '🪧', sentence: "What's this? It's a sign.", item: 'sign', block: 'sign' },
-      { word: 'pencil', emoji: '✏️', sentence: "It's a pencil." },
+      { word: 'pencil', emoji: '✏️', sentence: "It's a pencil.", proxyItem: 'stick', one: 'stick', many: 'sticks' },
       { word: 'pen', emoji: '🖊️', sentence: 'Is it a pen? Yes, it is.' },
     ],
   },
@@ -4704,7 +4905,7 @@ const PACKS = [
       { word: 'box', emoji: '📦', sentence: 'I put my things in the box.', item: 'chest', block: 'chest' },
       { word: 'table', emoji: '🪑', sentence: 'I work at the table.', item: 'crafting_table', block: 'crafting_table' },
       { word: 'lamp', emoji: '💡', sentence: 'The lamp is bright.', item: 'torch', block: 'torch' },
-      { word: 'door', emoji: '🚪', sentence: 'Open the door, please.' },
+      { word: 'door', emoji: '🚪', sentence: 'Open the door, please.', visit: 'village' },
       { word: 'floor', emoji: '⬛', sentence: 'The floor is under my feet.', item: 'stone', block: 'stone', one: 'floor block', many: 'floor blocks' },
     ],
   },
@@ -4752,9 +4953,9 @@ const PACKS = [
       { word: 'cactus', emoji: '🌵', sentence: 'The cactus is green and sharp.', item: 'cactus', block: 'cactus', many: 'cactuses' },
       { word: 'sugar cane', emoji: '🎋', sentence: 'Sugar cane grows by the sea.', item: 'sugar_cane', one: 'sugar cane', many: 'sugar canes' },
       { word: 'glass', emoji: '🫙', sentence: 'The glass is made from sand.', item: 'glass', block: 'glass', count: [2, 4], one: 'glass block', many: 'glass blocks' },
-      { word: 'sea', emoji: '🌊', sentence: "Let's swim in the sea!" },
-      { word: 'sun', emoji: '☀️', sentence: 'The sun is hot today.' },
-      { word: 'shell', emoji: '🐚', sentence: "Where's the shell? It's in the sand." },
+      { word: 'sea', emoji: '🌊', sentence: "Let's swim in the sea!", visit: 'sea' },
+      { word: 'sun', emoji: '☀️', sentence: 'The sun is hot today.', visit: 'sun' },
+      { word: 'shell', emoji: '🐚', sentence: "Where's the shell? It's in the sand.", visit: 'shell' },
       { word: 'boat', emoji: '⛵', sentence: 'The boat is on the water.' },
     ],
   },
@@ -4773,6 +4974,36 @@ const PACKS = [
       { word: 'stick', emoji: '🥢', sentence: 'I need two sticks.', item: 'stick' },
       { word: 'iron', emoji: '⚙️', sentence: 'Iron is strong.', item: 'iron_ingot', one: 'iron bar', many: 'iron bars', count: [1, 4] },
       { word: 'torch', emoji: '🔥', sentence: 'The torch makes light.', item: 'torch', block: 'torch' },
+    ],
+  },
+
+  // ===================================================== Year 3 =============
+  {
+    id: 'places',
+    name: 'Places',
+    emoji: '🏘️',
+    blurb: 'town, park, beach, river…',
+    years: [3],
+    book: 'Get Smart Plus 3',
+    lines: {
+      visit: [
+        'We are learning about the {word}. Please go there and come back.',
+        'Can you find the {word}? Visit it, then tell me.',
+      ],
+      fetch: [
+        'Our town needs {n} {what}. Can you bring them, please?',
+        'Please find {n} {what} for our lesson.',
+      ],
+    },
+    words: [
+      { word: 'town', emoji: '🏘️', sentence: 'I live in a town.', visit: 'village' },
+      { word: 'park', emoji: '🌳', sentence: 'We play in the park.', visit: 'grass' },
+      { word: 'beach', emoji: '🏖️', sentence: 'The beach is fun.', visit: 'shell' },
+      { word: 'river', emoji: '🏞️', sentence: 'The river has water.', visit: 'water' },
+      { word: 'shop', emoji: '🏪', sentence: 'We buy food at the shop.', item: 'bread', count: [2, 4] },
+      { word: 'street', emoji: '🛣️', sentence: 'The street is long.', item: 'cobblestone', block: 'cobblestone', one: 'street stone', many: 'street stones' },
+      { word: 'bridge', emoji: '🌉', sentence: 'Walk over the bridge.', item: 'oak_planks', block: 'oak_planks', one: 'bridge plank', many: 'bridge planks' },
+      { word: 'hill', emoji: '⛰️', sentence: 'The hill is high.', visit: 'sun' },
     ],
   },
 
@@ -4810,8 +5041,8 @@ const PACKS = [
       { word: 'sand', emoji: '🏜️', sentence: 'The wind covered the tomb with sand.', item: 'sand', block: 'sand', one: 'sand block', many: 'sand blocks' },
       { word: 'stone', emoji: '🪨', sentence: 'They cut the stone with simple tools.', item: 'cobblestone', block: 'cobblestone', one: 'stone block', many: 'stone blocks' },
       { word: 'jewel', emoji: '💚', sentence: 'The queen wore a green jewel.', item: 'emerald', count: [1, 3] },
-      { word: 'desert', emoji: '🐫', sentence: 'The desert was hot and dry.' },
-      { word: 'mummy', emoji: '🧟', sentence: 'They wrapped the mummy in bandages.' },
+      { word: 'desert', emoji: '🐫', sentence: 'The desert was hot and dry.', visit: 'desert' },
+      { word: 'mummy', emoji: '🧟', sentence: 'They wrapped the mummy in bandages.', visit: 'desert' },
     ],
   },
   {
@@ -4946,8 +5177,8 @@ const PACKS = [
       { word: 'wool', emoji: '🧶', sentence: 'My jumper is made of wool.', item: 'white_wool', block: 'white_wool', count: [2, 4], one: 'wool block', many: 'wool blocks' },
       { word: 'leather', emoji: '🟤', sentence: 'The bag is made of leather.', item: 'leather', count: [1, 4], one: 'piece of leather', many: 'pieces of leather', uncountable: true },
       { word: 'gold', emoji: '🪙', sentence: 'Gold is more expensive than iron.', item: 'gold_ingot', one: 'gold bar', many: 'gold bars', count: [1, 4] },
-      { word: 'plastic', emoji: '🧴', sentence: 'We should not throw plastic away.' },
-      { word: 'paper', emoji: '📄', sentence: 'Paper is easy to recycle.' },
+      { word: 'plastic', emoji: '🧴', sentence: 'We should not throw plastic away.', visit: 'water' },
+      { word: 'paper', emoji: '📄', sentence: 'Paper is easy to recycle.', proxyItem: 'bookshelf', one: 'book', many: 'books' },
     ],
   },
 ];
@@ -4967,7 +5198,11 @@ const NUMBER_WORDS = [
 const ORDINAL_WORDS = [
   'zeroth', 'first', 'second', 'third', 'fourth', 'fifth',
   'sixth', 'seventh', 'eighth', 'ninth', 'tenth',
-  'eleventh', 'twelfth',
+  'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth',
+  'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth',
+  'twenty-first', 'twenty-second', 'twenty-third', 'twenty-fourth', 'twenty-fifth',
+  'twenty-sixth', 'twenty-seventh', 'twenty-eighth', 'twenty-ninth', 'thirtieth',
+  'thirty-first',
 ];
 
 function numberWord(n) {
@@ -5019,6 +5254,8 @@ function fillLine(tpl, vars) {
     .replace(/\s+/g, ' ')
     .replace(/ ([.,!?])/g, '$1')
     .trim()
+    // "a orange sheep" → "an orange sheep", whatever word filled the slot.
+    .replace(/\b([Aa]) (?=(?:[aeio]|u(?!ni|se|su))\w)/gi, (m, a) => a + 'n ')
     // A placeholder can land at the start of a sentence ("How many? Six, I
     // think."), so capitalise there rather than making every template avoid it.
     .replace(/(^|[.!?]\s+)([a-z])/g, (m, lead, c) => lead + c.toUpperCase());
@@ -5028,7 +5265,8 @@ function fillLine(tpl, vars) {
 // year's own list is used. `fetchU` (uncountable) falls back to `fetch`.
 function linesFor(pack, year, type) {
   const packLines = pack && pack.lines;
-  const list = (packLines && packLines[type]) || (year && year.lines && year.lines[type]);
+  const list = (packLines && packLines[type]) || (year && year.lines && year.lines[type])
+    || COMMON_LINES[type];
   if (!list && type === 'fetchU') return linesFor(pack, year, 'fetch');
   return list || [];
 }
@@ -5067,24 +5305,26 @@ const VILLAGER_NAMES = [
 let questCounter = 0;
 
 class QuestSystem {
-  constructor(packId, year, entities, player, inventory, world) {
+  constructor(packId, year, entities, player, inventory, world, sky) {
     this.pack = packById(packId);
     this.year = yearById(year);
     this.entities = entities;
     this.player = player;
     this.inventory = inventory;
     this.world = world;
+    this.sky = sky;
     this.learned = new Set();      // words the player has completed a quest for
     this.completed = 0;
     this.emeralds = 0;
     this.onToast = null;           // (title, subtitle, emoji) => void
     this.onQuestDone = null;       // (quest) => void
+    this.give = null;              // (item, count) => void; drops what will not fit
     this.findCheck = 0;
   }
 
-  // A word can only become a quest if the world contains the thing it names.
+  // A word can only become a quest if the world can point at the thing it names.
   usableWords() {
-    const words = this.pack.words.filter((w) => w.item || w.mob || w.block);
+    const words = this.pack.words.filter((w) => w.item || w.mob || w.block || w.visit || w.proxyItem);
     if (words.length) return words;
     // Numbers-only packs have nothing of their own, so they borrow objects
     // from another pack in the same year — the counting is the point, but it
@@ -5100,7 +5340,7 @@ class QuestSystem {
   // How many of a thing to ask for. The year sets the range; a word can pin its
   // own, because ten diamonds is a different afternoon from ten apples.
   countFor(word, type) {
-    if (type === 'find') return 1;
+    if (type === 'find' || type === 'visit') return 1;
     const range = word.count || (this.year.counts && this.year.counts[type]) || [1, 3];
     const lo = range[0], hi = Math.max(range[0], range[1]);
     return lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -5118,9 +5358,10 @@ class QuestSystem {
     const w = this.pickWord();
     const id = ++questCounter;
     const kinds = [];
-    if (w.item && ITEMS[w.item]) kinds.push('fetch');
+    if ((w.item && ITEMS[w.item]) || (w.proxyItem && ITEMS[w.proxyItem])) kinds.push('fetch');
     if (w.mob && MOB_TYPES[w.mob]) kinds.push('find');
     if (w.block && B[w.block.toUpperCase()] !== undefined) kinds.push('place');
+    if (w.visit) kinds.push('visit');
     const type = kinds[Math.floor(Math.random() * kinds.length)] || 'fetch';
 
     const count = this.countFor(w, type);
@@ -5149,7 +5390,7 @@ class QuestSystem {
     if (type === 'fetch' && w.uncountable) lineKey = 'fetchU';
 
     if (type === 'fetch') {
-      q.item = w.item;
+      q.item = w.proxyItem || w.item;
     } else if (type === 'find') {
       q.mob = w.mob;
       q.mobColour = w.mobColour || null;
@@ -5158,13 +5399,17 @@ class QuestSystem {
       const what = q.mobColour ? q.mobColour + ' ' + MOB_TYPES[w.mob].label.toLowerCase() : w.word;
       q.findName = what;
       vars.mob = what;
+    } else if (type === 'visit') {
+      q.visit = w.visit;
     } else {
       q.block = B[w.block.toUpperCase()];
       q.blockName = w.block;
       q.origin = villager.pos.clone();
+      q.baseline = this.countBlocksNear(q.origin, q.block, Infinity);
       vars.block = w.block.replace(/_/g, ' ');
     }
 
+    q.vars = vars;
     const tpl = pickLine(this.pack, this.year, lineKey);
     q.text = fillLine(tpl, vars);
     q.hint = fillLine((this.year.hints && this.year.hints[type]) || '', vars);
@@ -5172,6 +5417,12 @@ class QuestSystem {
     // second time straight afterwards.
     if (tpl.indexOf('{sentence}') !== -1) q.sentence = '';
     return q;
+  }
+
+  // Any other line the game speaks, from COMMON_LINES or the year's overrides —
+  // never concatenated English.
+  line(key, vars) {
+    return fillLine(pickLine(this.pack, this.year, key), vars || {});
   }
 
   // Swap the class mid-session. Used by the debug console and by nothing else —
@@ -5194,22 +5445,27 @@ class QuestSystem {
   measure(q, villager) {
     if (!q) return 0;
     if (q.type === 'fetch') return Math.min(q.count, this.inventory.count(q.item));
-    if (q.type === 'find') return q.progress;
+    if (q.type === 'find' || q.type === 'visit') return q.progress;
     if (q.type === 'place') {
-      const o = villager ? villager.pos : q.origin;
-      let n = 0;
-      const cx = Math.floor(o.x), cy = Math.floor(o.y), cz = Math.floor(o.z);
-      for (let x = cx - 6; x <= cx + 6; x++) {
-        for (let z = cz - 6; z <= cz + 6; z++) {
-          for (let y = cy - 3; y <= cy + 5; y++) {
-            if (this.world.getBlock(x, y, z) === q.block) n++;
-            if (n >= q.count) return q.count;
-          }
-        }
-      }
-      return n;
+      // Only blocks added since the errand began count — a village built of
+      // planks must not finish "place three planks" on its own.
+      const n = this.countBlocksNear(q.origin, q.block, q.baseline + q.count);
+      return Math.max(0, Math.min(q.count, n - q.baseline));
     }
     return 0;
+  }
+
+  countBlocksNear(o, block, stopAt) {
+    let n = 0;
+    const cx = Math.floor(o.x), cy = Math.floor(o.y), cz = Math.floor(o.z);
+    for (let x = cx - 6; x <= cx + 6; x++) {
+      for (let z = cz - 6; z <= cz + 6; z++) {
+        for (let y = cy - 3; y <= cy + 5; y++) {
+          if (this.world.getBlock(x, y, z) === block && ++n >= stopAt) return n;
+        }
+      }
+    }
+    return n;
   }
 
   ready(q, villager) { return this.measure(q, villager) >= q.count; }
@@ -5251,7 +5507,9 @@ class QuestSystem {
       const e = extras[Math.floor(Math.random() * extras.length)];
       reward.push(e);
     }
-    for (const [item, n] of reward) this.inventory.add(item, n);
+    for (const [item, n] of reward) {
+      if (this.give) this.give(item, n); else this.inventory.add(item, n);
+    }
     q.reward = reward;
     q.praise = this.praiseLine();
     q.ordinal = ordinalWord(this.completed);
@@ -5262,29 +5520,57 @@ class QuestSystem {
     return true;
   }
 
-  // "Find a cow" completes by standing near one.
+  // "Find a cow" and "visit the sea" complete by standing in the right place.
   update(dt) {
     this.findCheck -= dt;
     if (this.findCheck > 0) return;
     this.findCheck = 0.4;
     const p = this.player.pos;
+    this.entities.wanted = this.wantedMobs();
     for (const v of this.entities.villagers) {
       const q = v.quest;
-      if (!q || q.type !== 'find' || q.done || q.progress >= 1) continue;
-      const wanted = q.findName || q.word.word;
-      for (const m of this.entities.mobs) {
-        if (m.type !== q.mob) continue;
-        if (q.mobColour && m.colourName !== q.mobColour) continue;
-        if (m.pos.distanceTo(p) < 4.5) {
-          q.progress = 1;
-          if (this.onToast) {
-            this.onToast('You found a ' + wanted + '!', 'Go back to ' + (v.name || 'the villager'), q.emoji);
+      if (!q || q.done) continue;
+
+      if (q.type === 'find' && q.progress < 1) {
+        for (const m of this.entities.mobs) {
+          if (m.type !== q.mob) continue;
+          if (q.mobColour && m.colourName !== q.mobColour) continue;
+          if (m.pos.distanceTo(p) < 4.5) {
+            q.progress = 1;
+            this.announceDone(q, v, 'found');
+            break;
           }
-          say('You found a ' + wanted + '. ' + (q.word.sentence || ''), { force: true, narrative: true });
-          break;
         }
       }
+
+      if (q.type === 'visit' && q.progress < 1 && checkVisit(q.visit, this.player, this.world, this.sky, this.entities)) {
+        q.progress = 1;
+        this.announceDone(q, v, 'visited');
+      }
     }
+  }
+
+  // "You found a red sheep! Go back to Farmer Ana." — toast and voice.
+  announceDone(q, v, key) {
+    const vars = Object.assign({}, q.vars, { mob: q.findName || q.word.word });
+    const done = this.line(key, vars);
+    const back = this.line('goBack', { name: v.name || 'the villager' });
+    if (this.onToast) this.onToast(done, back, q.emoji);
+    sayLines([done, q.word.sentence, back], { narrative: true });
+  }
+
+  // Animals an open errand depends on — "find a red sheep" or "bring red wool"
+  // — so the spawner can make sure one is somewhere nearby.
+  wantedMobs() {
+    const out = [];
+    for (const v of this.entities.villagers) {
+      const q = v.quest;
+      if (!q || q.done) continue;
+      if (q.type === 'find' && q.progress < 1) out.push({ type: q.mob, colour: q.mobColour });
+      const wool = q.type === 'fetch' && /^(\w+)_wool$/.exec(q.item);
+      if (wool) out.push({ type: 'sheep', colour: wool[1] });
+    }
+    return out;
   }
 
   wordList() {
@@ -5303,12 +5589,13 @@ function validateWords() {
     if (!pack.years || !pack.years.length) bad.push(pack.id + ': no `years`');
     for (const w of pack.words) {
       if (w.item && !ITEMS[w.item]) bad.push(pack.id + '/' + w.word + ': no such item "' + w.item + '"');
+      if (w.proxyItem && !ITEMS[w.proxyItem]) bad.push(pack.id + '/' + w.word + ': no such proxy item "' + w.proxyItem + '"');
       if (w.mob && !MOB_TYPES[w.mob]) bad.push(pack.id + '/' + w.word + ': no such mob "' + w.mob + '"');
       if (w.block && B[w.block.toUpperCase()] === undefined) {
         bad.push(pack.id + '/' + w.word + ': no such block "' + w.block + '"');
       }
     }
-    if (!pack.numbersOnly && !pack.words.some((w) => w.item || w.mob || w.block)) {
+    if (!pack.numbersOnly && !pack.words.some((w) => w.item || w.mob || w.block || w.visit || w.proxyItem)) {
       bad.push(pack.id + ': no word can become a quest');
     }
   }
@@ -5320,6 +5607,51 @@ function hashString(s) {
   let h = 0;
   for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0;
   return h;
+}
+
+function nearWater(world, x, y, z, r) {
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -1; dy <= 2; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (world.getBlock(x + dx, y + dy, z + dz) === B.WATER) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function checkVisit(kind, player, world, sky, entities) {
+  const px = Math.floor(player.pos.x);
+  const py = Math.floor(player.pos.y);
+  const pz = Math.floor(player.pos.z);
+  const seed = world.seed;
+  const h = heightAt(seed, px, pz);
+
+  switch (kind) {
+    case 'sea':
+      return world.getBlock(px, py, pz) === B.WATER
+        || world.getBlock(px, py - 1, pz) === B.WATER
+        || nearWater(world, px, py, pz, 2);
+    case 'sun':
+      return sky && sky.daylight > 0.55
+        && world.getBlock(px, py + 1, pz) === B.AIR
+        && py > SEA_LEVEL + 2;
+    case 'shell':
+      return world.getBlock(px, py - 1, pz) === B.SAND && nearWater(world, px, py, pz, 5);
+    case 'desert':
+      return biomeAt(seed, px, pz, h).name === 'Desert';
+    case 'village':
+      for (const v of entities.villagers) {
+        if (v.pos.distanceTo(player.pos) < 10) return true;
+      }
+      return false;
+    case 'grass':
+      return world.getBlock(px, py - 1, pz) === B.GRASS_BLOCK;
+    case 'water':
+      return nearWater(world, px, py, pz, 4);
+    default:
+      return false;
+  }
 }
 
 // ------------------------------------------------------------- advancements
@@ -5395,6 +5727,12 @@ function initUI(hooks) {
     questText: $('quest-text'), questProgress: $('quest-progress'),
     questAccept: $('quest-accept'), questDeliver: $('quest-deliver'),
     questClose: $('quest-close'), questSpeak: $('quest-speak'),
+    wordbook: $('wordbook-screen'), wordbookGrid: $('wordbook-grid'),
+    wordbookProgress: $('wordbook-progress'), wordbookClose: $('wordbook-close'),
+    teacher: $('teacher-screen'), teacherPin: $('teacher-pin'),
+    teacherClassFilter: $('teacher-class-filter'), teacherExport: $('teacher-export'),
+    teacherStatus: $('teacher-status'), teacherClose: $('teacher-close'),
+    tutorialHint: $('tutorial-hint'), emeralds: $('emeralds'),
   };
 
   // Extra layers the CSS expects but that are pure decoration.
@@ -5466,6 +5804,15 @@ function renderBars(player) {
       hunger.appendChild(pip('hunger', Math.max(0, Math.min(1, fd / 2 - i))));
     }
   }
+}
+
+// Emeralds earned from villagers, shown beside the hotbar.
+function renderEmeralds(n) {
+  const el = UI.el.emeralds;
+  if (!el || el.dataset.n === String(n)) return;
+  el.dataset.n = String(n);
+  el.textContent = '💚 ' + n;
+  el.classList.toggle('hidden', !n);
 }
 
 // --------------------------------------------------------------- hotbar
@@ -5562,8 +5909,9 @@ function bindSlot(el, get, set, opts = {}) {
 
     if (opts.output) { // crafting / smelting result: take only
       if (!here) return;
+      const limit = ITEMS[here.item] ? ITEMS[here.item].stack : 64;
       if (!cur) setCursor({ item: here.item, count: here.count });
-      else if (stacksEqual(cur, here)) cur.count += here.count;
+      else if (stacksEqual(cur, here) && cur.count + here.count <= limit) cur.count += here.count;
       else return;
       if (opts.onTake) opts.onTake();
       Sfx.craft();
@@ -5614,14 +5962,16 @@ function openInventory(mode, context) {
 }
 
 function closeInventory(inv) {
-  // Anything left in the crafting grid or on the cursor goes back to the bag.
+  // Anything left in the crafting grid or on the cursor goes back to the bag,
+  // or onto the ground if the bag is full.
+  const give = UI.hooks.giveOrDrop || ((item, n) => inv.add(item, n));
   if (UI.context && UI.context.craft) {
     for (let i = 0; i < UI.context.craft.slots.length; i++) {
       const s = UI.context.craft.slots[i];
-      if (s) { inv.add(s.item, s.count); UI.context.craft.slots[i] = null; }
+      if (s) { give(s.item, s.count); UI.context.craft.slots[i] = null; }
     }
   }
-  if (UI.cursor) { inv.add(UI.cursor.item, UI.cursor.count); setCursor(null); }
+  if (UI.cursor) { give(UI.cursor.item, UI.cursor.count); setCursor(null); }
   UI.mode = null;
   UI.context = null;
   UI.el.inv.classList.add('hidden');
@@ -5741,25 +6091,25 @@ function openQuest(villager, quests) {
   const have = quests.measure(q, villager);
   const ready = have >= q.count;
 
-  // Highlight the words that carry the meaning.
-  let text = q.text;
-  const kw = q.word.word;
-  text = text.replace(new RegExp('(' + kw + 's?|' + numberWord(q.count) + ')', 'gi'),
-    (m) => '<span class="kw">' + m + '</span>');
-  el.questText.innerHTML = text;
+  el.questText.innerHTML = highlightKeywords(q.text, [q.word.word, numberWord(q.count)]);
 
-  if (q.type === 'find') {
+  // The year's own one-line reminder of what to do, plus a tally where
+  // there is something to count.
+  const hintLine = escapeHtml(q.hint || '');
+  if (q.type === 'find' || q.type === 'visit') {
     el.questProgress.innerHTML = ready
-      ? '<span class="ok">✔ You found it!</span>'
-      : 'Go and look for a ' + (q.findName || kw) + '.';
+      ? '<span class="ok">✔ ' + escapeHtml(quests.line(q.type === 'find' ? 'found' : 'visited',
+        Object.assign({}, q.vars, { mob: q.findName || q.word.word }))) + '</span>'
+      : hintLine;
   } else {
     el.questProgress.innerHTML =
-      (ready ? '<span class="ok">✔ ' : '') + have + ' / ' + q.count + (ready ? '</span>' : '');
+      (ready ? '<span class="ok">✔ ' : '') + have + ' / ' + q.count + (ready ? '</span>' : '') +
+      (hintLine && !ready ? '<br><span class="quest-hint">' + hintLine + '</span>' : '');
   }
 
   el.questAccept.classList.toggle('hidden', ready);
   el.questDeliver.classList.toggle('hidden', !ready);
-  el.questDeliver.textContent = q.type === 'find' ? 'I found it!' : 'Here you are!';
+  el.questDeliver.textContent = (q.type === 'find' || q.type === 'visit') ? 'I found it!' : 'Here you are!';
 
   quests.speakQuest(q, villager);
   el.questSpeak.onclick = () => quests.speakQuest(q, villager);
@@ -5769,15 +6119,31 @@ function openQuest(villager, quests) {
     if (quests.deliver(q, villager)) {
       const rewardText = (q.reward || []).map(([it, n]) => n + ' × ' + itemLabel(it)).join(', ');
       el.questVisual.textContent = '🎉';
-      el.questText.innerHTML = 'Thank you! Well done!';
-      el.questProgress.innerHTML = '<span class="quest-reward">You got: ' + rewardText + '</span>';
+      el.questText.textContent = q.praise || 'Well done!';
+      el.questProgress.innerHTML = '<span class="quest-reward">You got: ' + escapeHtml(rewardText) + '</span>';
       el.questDeliver.classList.add('hidden');
       el.questAccept.classList.remove('hidden');
       el.questAccept.textContent = 'Bye!';
-      sayLines(['Thank you! Well done!', q.word.sentence || ''], { narrative: true });
+      sayLines([q.praise || 'Well done!', q.word.sentence || ''], { narrative: true });
       Sfx.levelUp();
     }
   };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Wrap whole-word matches of the key words (and simple plurals) in a
+// highlight, so "one" lights up in "one apple" but not inside "stone".
+function highlightKeywords(text, words) {
+  const safe = escapeHtml(text);
+  const alts = words.filter(Boolean)
+    .map((w) => String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length);
+  if (!alts.length) return safe;
+  const re = new RegExp('\\b(' + alts.join('|') + ')(e?s)?\\b', 'gi');
+  return safe.replace(re, (m) => '<span class="kw">' + m + '</span>');
 }
 
 function closeQuest() {
@@ -5787,6 +6153,51 @@ function closeQuest() {
 }
 
 function questOpen() { return !UI.el.quest.classList.contains('hidden'); }
+
+// --------------------------------------------------------------- word book
+function openWordBook(quests) {
+  const el = UI.el;
+  const list = quests.wordList();
+  const learned = list.filter((w) => w.learned).length;
+  el.wordbookProgress.textContent = learned + ' / ' + list.length + ' words learned';
+  el.wordbookGrid.innerHTML = '';
+  list.forEach((w) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wordbook-card' + (w.learned ? ' learned' : '');
+    btn.innerHTML = '<span class="wb-emoji">' + (w.emoji || '❓') + '</span><span class="wb-word">' + w.word + '</span>';
+    btn.onclick = () => say(w.word, { force: true });
+    el.wordbookGrid.appendChild(btn);
+  });
+  el.wordbook.classList.remove('hidden');
+  if (document.exitPointerLock) document.exitPointerLock();
+}
+
+function closeWordBook() {
+  UI.el.wordbook.classList.add('hidden');
+  if (UI.hooks.onCloseScreen) UI.hooks.onCloseScreen();
+}
+
+function wordbookOpen() { return !UI.el.wordbook.classList.contains('hidden'); }
+
+// -------------------------------------------------------------- teacher
+function openTeacher() {
+  const el = UI.el;
+  el.teacherPin.value = '';
+  el.teacherStatus.textContent = '';
+  el.teacher.classList.remove('hidden');
+  el.teacherPin.focus();
+}
+
+function closeTeacher() {
+  UI.el.teacher.classList.add('hidden');
+}
+
+function teacherOpen() { return !UI.el.teacher.classList.contains('hidden'); }
+
+function setTutorialHint(on) {
+  UI.el.tutorialHint.classList.toggle('hidden', !on);
+}
 
 // ------------------------------------------------------------------ signs
 // Writing a word on a sign is the one place children type English. The word
@@ -5850,8 +6261,13 @@ function anyScreenOpen() {
          !UI.el.quest.classList.contains('hidden') ||
          !UI.el.sign.classList.contains('hidden') ||
          !UI.el.pause.classList.contains('hidden') ||
-         !UI.el.title.classList.contains('hidden');
+         !UI.el.title.classList.contains('hidden') ||
+         !UI.el.wordbook.classList.contains('hidden') ||
+         !UI.el.teacher.classList.contains('hidden');
 }
+
+// ===== js/teacher-config.js =====
+const TEACHER_PIN = "4826";
 
 // ===== js/firebase-config.js =====
 const FIREBASE_CONFIG = {
@@ -5869,9 +6285,13 @@ const FIREBASE_CONFIG = {
 
 const SCHEMA_VERSION = 1;
 const SAVES_COLLECTION = 'saves';
+const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.14.0';
 
 let db = null;
+let auth = null;
 let cloudReady = false;
+let authUid = null;
+let sdkLoading = null;
 
 function normalizeName(name) {
   const n = (name || '').trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
@@ -5887,18 +6307,51 @@ function isCloudEnabled() {
   return cloudReady && db !== null;
 }
 
-function initSaves() {
-  let cfg = null;
+function getAuthUid() {
+  return authUid;
+}
+
+function firebaseConfig() {
   if (typeof FIREBASE_CONFIG !== 'undefined'
     && FIREBASE_CONFIG
     && FIREBASE_CONFIG.projectId
     && FIREBASE_CONFIG.projectId !== 'YOUR_PROJECT_ID') {
-    cfg = FIREBASE_CONFIG;
+    return FIREBASE_CONFIG;
   }
-  if (!cfg || typeof firebase === 'undefined') return false;
+  return null;
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureFirebaseSdk() {
+  if (typeof firebase !== 'undefined') return;
+  if (sdkLoading) return sdkLoading;
+  sdkLoading = (async () => {
+    await loadScript(`${FIREBASE_SDK}/firebase-app-compat.js`);
+    await loadScript(`${FIREBASE_SDK}/firebase-auth-compat.js`);
+    await loadScript(`${FIREBASE_SDK}/firebase-firestore-compat.js`);
+  })();
+  return sdkLoading;
+}
+
+async function initSaves() {
+  const cfg = firebaseConfig();
+  if (!cfg) return false;
   try {
+    await ensureFirebaseSdk();
     if (!firebase.apps.length) firebase.initializeApp(cfg);
+    auth = firebase.auth();
     db = firebase.firestore();
+    const cred = await auth.signInAnonymously();
+    authUid = cred.user.uid;
     cloudReady = true;
     return true;
   } catch (e) {
@@ -5935,16 +6388,18 @@ async function loadCloudSave(name) {
   }
 }
 
-async function saveCloudSave(name, data) {
+async function saveCloudSave(name, data, meta = {}) {
   if (!isCloudEnabled()) return false;
   const id = normalizeName(name);
-  if (!id) return false;
+  if (!id || !authUid) return false;
   const displayName = (name || '').trim().slice(0, 32);
   try {
     await db.collection(SAVES_COLLECTION).doc(id).set({
       displayName,
       updatedAt: Date.now(),
       schemaVersion: SCHEMA_VERSION,
+      uid: authUid,
+      classCode: meta.classCode || '',
       data,
     });
     return true;
@@ -5952,6 +6407,87 @@ async function saveCloudSave(name, data) {
     console.warn('Cloud save failed:', e);
     return false;
   }
+}
+
+function listLocalSaves() {
+  const out = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith('blockwords.save.')) continue;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      out.push({
+        name: key.replace('blockwords.save.', ''),
+        displayName: data.playerName || key.replace('blockwords.save.', ''),
+        updatedAt: data.savedAt || null,
+        data,
+      });
+    } catch (e) { /* skip corrupt */ }
+  }
+  return out;
+}
+
+async function listCloudSaves() {
+  if (!isCloudEnabled()) return [];
+  try {
+    const snap = await db.collection(SAVES_COLLECTION).limit(200).get();
+    return snap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        name: doc.id,
+        displayName: d.displayName || doc.id,
+        updatedAt: d.updatedAt || null,
+        classCode: d.classCode || '',
+        data: d.data || {},
+      };
+    });
+  } catch (e) {
+    console.warn('Cloud list failed:', e);
+    return [];
+  }
+}
+
+function saveRowFromData(entry) {
+  const d = entry.data || {};
+  const learned = Array.isArray(d.learned) ? d.learned : [];
+  return {
+    name: entry.displayName || entry.name,
+    year: d.year || '',
+    pack: d.packId || '',
+    wordsLearned: learned.length,
+    questsCompleted: d.questsCompleted || 0,
+    emeralds: d.emeralds || 0,
+    classCode: entry.classCode || d.classCode || '',
+    updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : '',
+  };
+}
+
+function savesToCsv(rows) {
+  const headers = ['name', 'year', 'pack', 'wordsLearned', 'questsCompleted', 'emeralds', 'classCode', 'updatedAt'];
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push(headers.map((h) => {
+      const v = String(r[h] ?? '');
+      return v.includes(',') ? `"${v.replace(/"/g, '""')}"` : v;
+    }).join(','));
+  }
+  return lines.join('\n');
+}
+
+async function exportTeacherCsv(classCode = '') {
+  const local = listLocalSaves().map(saveRowFromData);
+  let cloud = [];
+  if (isCloudEnabled()) {
+    const all = await listCloudSaves();
+    cloud = all
+      .filter((e) => !classCode || e.classCode === classCode)
+      .map(saveRowFromData);
+  }
+  const merged = new Map();
+  for (const row of [...local, ...cloud]) merged.set(row.name.toLowerCase(), row);
+  return savesToCsv([...merged.values()]);
 }
 
 // ===== js/main.js =====
@@ -5966,6 +6502,7 @@ const state = {
   packId: 'animals',
   year: 1,
   playerName: '',
+  classCode: '',
   renderDistance: 6,
   thirdPerson: 0,   // 0 = first person, 1 = behind, 2 = in front
   debug: false,
@@ -5973,6 +6510,8 @@ const state = {
 };
 
 let nameCheckTimer = null;
+let tutorialTimer = 0;
+let tutorialVillager = null;
 
 const input = {
   forward: 0, strafe: 0, jump: false, sneak: false, sprint: false,
@@ -6086,6 +6625,7 @@ function buildYearPicker() {
   YEARS.forEach((y) => {
     const b = document.createElement('button');
     b.className = 'pack-btn year-btn' + (y.id === state.year ? ' sel' : '');
+    b.setAttribute('aria-pressed', String(y.id === state.year));
     b.innerHTML = '<span class="pack-emoji"></span><span class="pack-word"></span>'
       + '<span class="pack-blurb"></span><span class="pack-book"></span>';
     b.querySelector('.pack-emoji').textContent = y.emoji;
@@ -6095,8 +6635,9 @@ function buildYearPicker() {
     b.onclick = () => {
       state.year = y.id;
       state.packId = defaultPackForYear(y.id);
-      [...box.children].forEach((c) => c.classList.remove('sel'));
+      [...box.children].forEach((c) => { c.classList.remove('sel'); c.setAttribute('aria-pressed', 'false'); });
       b.classList.add('sel');
+      b.setAttribute('aria-pressed', 'true');
       buildPackPicker();
       say(y.label);
     };
@@ -6113,6 +6654,7 @@ function buildPackPicker() {
   packs.forEach((p) => {
     const b = document.createElement('button');
     b.className = 'pack-btn' + (p.id === state.packId ? ' sel' : '');
+    b.setAttribute('aria-pressed', String(p.id === state.packId));
     b.innerHTML = '<span class="pack-emoji"></span><span class="pack-word"></span>'
       + '<span class="pack-blurb"></span><span class="pack-book"></span>';
     b.querySelector('.pack-emoji').textContent = p.emoji;
@@ -6121,12 +6663,38 @@ function buildPackPicker() {
     b.querySelector('.pack-book').textContent = p.book || '';
     b.onclick = () => {
       state.packId = p.id;
-      [...box.children].forEach((c) => c.classList.remove('sel'));
+      [...box.children].forEach((c) => { c.classList.remove('sel'); c.setAttribute('aria-pressed', 'false'); });
       b.classList.add('sel');
+      b.setAttribute('aria-pressed', 'true');
       say(p.name);
     };
     box.appendChild(b);
   });
+}
+
+function getClassCode() {
+  const el = document.getElementById('class-input');
+  return el ? el.value.trim().slice(0, 16) : '';
+}
+
+function applyUiScale(scale) {
+  const s = Math.max(1, Math.min(1.3, Number(scale) || 1));
+  document.documentElement.style.setProperty('--ui-scale', String(s));
+  localStorage.setItem('blockwords.uiScale', String(s));
+}
+
+function getTeacherPin() {
+  return (typeof TEACHER_PIN !== 'undefined' && TEACHER_PIN) ? String(TEACHER_PIN) : '4826';
+}
+
+function downloadCsv(filename, text) {
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function getPlayerName() {
@@ -6151,23 +6719,55 @@ function saveLocalSave(name, data) {
   }
 }
 
+// Shows Continue only when this name has a world, and says which class and
+// word pack that world will load — a save keeps its own year and pack.
+let continueCheck = 0;
 async function updateContinueButton() {
   const cont = document.getElementById('btn-continue');
+  const info = document.getElementById('continue-info');
   if (!cont) return;
+  const token = ++continueCheck;
   const name = getPlayerName();
-  if (!normalizeName(name)) {
-    cont.classList.add('hidden');
-    return;
+  disarmPlay();
+  let saved = normalizeName(name) ? loadLocalSave(name) : null;
+  if (!saved && normalizeName(name) && isCloudEnabled()) saved = await loadCloudSave(name);
+  if (token !== continueCheck) return;   // the name changed while we waited
+  cont.classList.toggle('hidden', !saved);
+  if (info) {
+    info.classList.toggle('hidden', !saved);
+    if (saved) {
+      const y = YEARS.find((x) => x.id === saved.year);
+      const pk = packById(saved.packId);
+      info.textContent = 'Saved world: ' + [y && y.label, pk && pk.name].filter(Boolean).join(' · ');
+    }
   }
-  let exists = !!loadLocalSave(name);
-  if (!exists && isCloudEnabled()) exists = await hasCloudSave(name);
-  cont.classList.toggle('hidden', !exists);
+}
+
+// Play on a name that already has a world needs a second, deliberate click.
+let playArmed = false;
+function disarmPlay() {
+  playArmed = false;
+  const b = document.getElementById('btn-play');
+  if (b) { b.textContent = 'Play'; b.classList.remove('armed'); }
 }
 
 function wireMenus() {
   const nameInput = document.getElementById('name-input');
+  const classInput = document.getElementById('class-input');
   const savedName = localStorage.getItem('blockwords.playerName');
+  const savedClass = localStorage.getItem('blockwords.classCode');
+  const savedScale = localStorage.getItem('blockwords.uiScale');
   if (savedName && nameInput) nameInput.value = savedName;
+  if (savedClass && classInput) classInput.value = savedClass;
+  const scaleSel = document.getElementById('opt-ui-scale');
+  if (scaleSel) {
+    scaleSel.value = savedScale || '1';
+    applyUiScale(scaleSel.value);
+    scaleSel.onchange = () => applyUiScale(scaleSel.value);
+  }
+  classInput?.addEventListener('input', () => {
+    localStorage.setItem('blockwords.classCode', getClassCode());
+  });
 
   nameInput?.addEventListener('input', () => {
     clearTimeout(nameCheckTimer);
@@ -6182,17 +6782,19 @@ function wireMenus() {
       return;
     }
     state.playerName = name;
+    state.classCode = getClassCode();
     localStorage.setItem('blockwords.playerName', name);
-    if (isCloudEnabled() && await hasCloudSave(name)) {
-      const display = name.trim();
-      toast('Save found', `${display} already has a world — tap Continue instead.`, '💾');
+    localStorage.setItem('blockwords.classCode', state.classCode);
+    const hasSave = !!loadLocalSave(name) || (isCloudEnabled() && await hasCloudSave(name));
+    if (hasSave && !playArmed) {
+      playArmed = true;
+      const b = document.getElementById('btn-play');
+      b.textContent = 'Start a NEW world? Click again';
+      b.classList.add('armed');
+      toast('Save found', `${name.trim()} already has a world. Tap Continue to keep it, or click again to start a new one.`, '💾');
       return;
     }
-    if (loadLocalSave(name)) {
-      const display = name.trim();
-      toast('Save found', `${display} already has a world — tap Continue instead.`, '💾');
-      return;
-    }
+    disarmPlay();
     const seedText = document.getElementById('seed-input').value.trim();
     startGame(seedFromString(seedText), null);
   };
@@ -6206,7 +6808,9 @@ function wireMenus() {
       return;
     }
     state.playerName = name;
+    state.classCode = getClassCode();
     localStorage.setItem('blockwords.playerName', name);
+    localStorage.setItem('blockwords.classCode', state.classCode);
     cont.disabled = true;
     const saved = await loadSaveData(name);
     cont.disabled = false;
@@ -6219,14 +6823,25 @@ function wireMenus() {
 
   updateContinueButton();
 
+  // Sound choices are remembered per browser, like the screen size.
   const speechBoxes = [document.getElementById('opt-speech'), document.getElementById('opt-speech2')];
+  const speechOn = localStorage.getItem('blockwords.speech') !== '0';
+  setSpeechEnabled(speechOn);
   speechBoxes.forEach((cb) => {
+    cb.checked = speechOn;
     cb.onchange = () => {
       setSpeechEnabled(cb.checked);
+      localStorage.setItem('blockwords.speech', cb.checked ? '1' : '0');
       speechBoxes.forEach((o) => { o.checked = cb.checked; });
     };
   });
-  document.getElementById('opt-music').onchange = (e) => setMusicEnabled(e.target.checked);
+  const musicBox = document.getElementById('opt-music');
+  musicBox.checked = localStorage.getItem('blockwords.music') !== '0';
+  setMusicEnabled(musicBox.checked);
+  musicBox.onchange = () => {
+    setMusicEnabled(musicBox.checked);
+    localStorage.setItem('blockwords.music', musicBox.checked ? '1' : '0');
+  };
   const dist = document.getElementById('opt-dist');
   dist.oninput = () => {
     state.renderDistance = +dist.value;
@@ -6243,6 +6858,33 @@ function wireMenus() {
   document.getElementById('btn-quit').onclick = () => {
     saveGame().then(() => { location.reload(); });
   };
+
+  document.getElementById('btn-wordbook')?.addEventListener('click', () => {
+    if (!state.started || !quests) return;
+    showWordBook(true);
+  });
+  document.getElementById('wordbook-close')?.addEventListener('click', hideWordBook);
+
+  document.getElementById('btn-teacher')?.addEventListener('click', () => openTeacher());
+  document.getElementById('teacher-close')?.addEventListener('click', () => closeTeacher());
+  document.getElementById('teacher-export')?.addEventListener('click', async () => {
+    const pin = document.getElementById('teacher-pin')?.value || '';
+    const status = document.getElementById('teacher-status');
+    if (pin !== getTeacherPin()) {
+      if (status) status.textContent = 'Wrong PIN.';
+      return;
+    }
+    if (status) status.textContent = 'Preparing export…';
+    try {
+      const filter = document.getElementById('teacher-class-filter')?.value.trim() || '';
+      const csv = await exportTeacherCsv(filter);
+      downloadCsv('blockwords-progress.csv', csv);
+      if (status) status.textContent = 'Download started.';
+    } catch (e) {
+      if (status) status.textContent = 'Export failed.';
+      console.warn(e);
+    }
+  });
 }
 
 // ================================================================= new game
@@ -6252,6 +6894,7 @@ function startGame(seed, saved) {
   state.seed = seed >>> 0;
   if (saved && saved.year) state.year = saved.year;
   if (saved && saved.packId) state.packId = saved.packId;
+  state.classCode = (saved && saved.classCode) ? saved.classCode : getClassCode();
   if (saved && saved.playerName) {
     state.playerName = saved.playerName;
     localStorage.setItem('blockwords.playerName', saved.playerName);
@@ -6285,7 +6928,7 @@ function startGame(seed, saved) {
   sky = new Sky(scene, materials);
   sky.setFogDistance(state.renderDistance);
   entities = new Entities(world, scene, state.seed);
-  quests = new QuestSystem(state.packId, state.year, entities, player, inventory, world);
+  quests = new QuestSystem(state.packId, state.year, entities, player, inventory, world, sky);
 
   wireCallbacks();
   initHelpers();
@@ -6302,12 +6945,28 @@ function startGame(seed, saved) {
     advancements.load(saved.advancements);
     if (saved.time !== undefined) sky.time = saved.time;
     if (saved.learned) saved.learned.forEach((w) => quests.learned.add(w));
+    if (saved.questsCompleted !== undefined) quests.completed = saved.questsCompleted;
+    if (saved.emeralds !== undefined) quests.emeralds = saved.emeralds;
+    if (saved.classCode) {
+      state.classCode = saved.classCode;
+      const cc = document.getElementById('class-input');
+      if (cc) cc.value = saved.classCode;
+    }
     if (saved.signs) for (const [k, t] of saved.signs) signs.set(k, t);
     if (saved.chests) {
       for (const [k, arr] of saved.chests) {
         const set = new SlotSet(27);
         arr.forEach((v, i) => { if (v && ITEMS[v[0]]) set.slots[i] = { item: v[0], count: v[1] }; });
         chests.set(k, set);
+      }
+    }
+    if (saved.furnaces) {
+      const stack = (v) => (v && ITEMS[v[0]] ? { item: v[0], count: v[1] } : null);
+      for (const [k, f] of saved.furnaces) {
+        furnaces.set(k, {
+          input: stack(f.input), fuel: stack(f.fuel), output: stack(f.output),
+          burn: f.burn || 0, burnMax: f.burnMax || 1, cook: f.cook || 0, cookMax: 8,
+        });
       }
     }
   } else {
@@ -6357,7 +7016,49 @@ function finishStart(freshSpawn) {
 
   sayLines(['Welcome to Block Words!', 'Find a villager and listen to the job.'], { narrative: true });
   toast('Welcome!', 'Explore, mine and build. Talk to villagers.', '🌍');
+  if (freshSpawn) startTutorial();
   requestPointerLock();
+}
+
+function startTutorial() {
+  if (localStorage.getItem('blockwords.tutorialDone')) return;
+  setTutorialHint(true);
+  tutorialTimer = 120;   // fallback only — talking to a villager ends it
+  let best = Infinity;
+  tutorialVillager = null;
+  for (const v of entities.villagers) {
+    const d = v.pos.distanceTo(player.pos);
+    if (d < best) { best = d; tutorialVillager = v; }
+  }
+  say('Walk to a villager with an exclamation mark. Right-click to hear the job.', { narrative: true });
+}
+
+function endTutorial() {
+  if (tutorialTimer <= 0) return;
+  tutorialTimer = 0;
+  setTutorialHint(false);
+  localStorage.setItem('blockwords.tutorialDone', '1');
+  tutorialVillager = null;
+}
+
+function updateTutorial(dt) {
+  if (tutorialTimer <= 0) return;
+  tutorialTimer -= dt;
+  if (tutorialTimer <= 0) { tutorialTimer = 1; endTutorial(); return; }
+  // Never cover a dialog's buttons.
+  setTutorialHint(!anyScreenOpen());
+  // Villagers load in after the first frames, so keep looking for the nearest.
+  if (!tutorialVillager) {
+    let best = 48;
+    for (const v of entities.villagers) {
+      const d = v.pos.distanceTo(player.pos);
+      if (d < best) { best = d; tutorialVillager = v; }
+    }
+  }
+  if (tutorialVillager) {
+    const p = tutorialVillager.pos;
+    spawnSparkle(p.x + (rand() - 0.5) * 0.5, p.y + 2.2 + rand() * 0.4, p.z + (rand() - 0.5) * 0.5);
+  }
 }
 
 function wireCallbacks() {
@@ -6378,6 +7079,7 @@ function wireCallbacks() {
   };
   entities.onVillagerReady = (v) => quests.assign(v);
 
+  quests.give = giveOrDrop;
   quests.onToast = (t, s, e) => toast(t, s, e, 'quest');
   quests.onQuestDone = (q) => {
     toast(q.praise || 'Well done!', 'You finished: ' + q.text, q.emoji, 'quest');
@@ -6401,7 +7103,17 @@ function wireCallbacks() {
       renderHotbar(inventory);
     },
     onCloseScreen: () => requestPointerLock(),
+    giveOrDrop,
   });
+}
+
+// Put items in the bag; whatever does not fit lands at the player's feet
+// instead of silently disappearing.
+function giveOrDrop(item, count) {
+  const left = inventory.add(item, count);
+  if (left > 0) entities.dropItem(player.pos.x, player.pos.y + 0.5, player.pos.z, item, left);
+  renderHotbar(inventory);
+  return left;
 }
 
 function checkItemAdvancements(item) {
@@ -6416,6 +7128,19 @@ function requestPointerLock() {
   if (!state.started || state.paused || anyScreenOpen()) return;
   const el = renderer.domElement;
   if (document.pointerLockElement !== el && el.requestPointerLock) el.requestPointerLock();
+}
+
+// The Word Book goes back to wherever it was opened from: the pause menu, or
+// straight back into the game when opened with B.
+let wordbookFromPause = false;
+function showWordBook(fromPause) {
+  wordbookFromPause = fromPause;
+  setPaused(true);
+  openWordBook(quests);
+}
+function hideWordBook() {
+  closeWordBook();
+  if (!wordbookFromPause) setPaused(false);
 }
 
 function setPaused(on) {
@@ -6472,6 +7197,24 @@ function initInput() {
   });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  // Esc under pointer lock is swallowed by the browser: the mouse is freed but
+  // no keydown arrives. Losing the lock with no screen open therefore means
+  // "pause", exactly like the original.
+  document.addEventListener('pointerlockchange', () => {
+    if (locked()) return;
+    if (state.started && !state.paused && !anyScreenOpen()) {
+      state.lockLostAt = performance.now();
+      setPaused(true);
+    }
+  });
+
+  // Closing the tab or the laptop lid must not lose the last half-minute.
+  const saveNow = () => { if (state.started) saveGame(); };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveNow();
+  });
+  window.addEventListener('pagehide', saveNow);
+
   document.addEventListener('wheel', (e) => {
     if (!state.started || anyScreenOpen()) return;
     const dir = e.deltaY > 0 ? 1 : -1;
@@ -6492,8 +7235,15 @@ function handleKey(e) {
   const code = e.code;
   if (code === 'Escape') {
     if (!UI.el.inv.classList.contains('hidden')) { closeInventory(inventory); requestPointerLock(); }
+    else if (wordbookOpen()) hideWordBook();
     else if (questOpen()) closeQuest();
-    else if (state.started) setPaused(!state.paused);
+    else if (teacherOpen()) closeTeacher();
+    else if (state.started) {
+      // Some browsers deliver the Esc that released the pointer lock as well;
+      // it must not immediately un-pause what the lock loss just paused.
+      if (state.paused && performance.now() - (state.lockLostAt || 0) < 400) return;
+      setPaused(!state.paused);
+    }
     return;
   }
   if (!state.started) return;
@@ -6520,11 +7270,14 @@ function handleKey(e) {
     case 'KeyM': {
       const cb = document.getElementById('opt-music');
       cb.checked = !cb.checked;
-      setMusicEnabled(cb.checked);
+      cb.onchange();
       break;
     }
     case 'F3': e.preventDefault(); state.debug = !state.debug; setDebugVisible(state.debug); break;
     case 'F5': e.preventDefault(); state.thirdPerson = (state.thirdPerson + 1) % 3; break;
+    case 'KeyB':
+      if (!anyScreenOpen() && quests) showWordBook(false);
+      break;
     case 'KeyR': if (e.ctrlKey) return; break;
     default: break;
   }
@@ -6640,17 +7393,14 @@ function useHeld() {
   if (anyScreenOpen() || state.paused) return;
 
   // Talking to a villager comes first — it is the point of the game.
-  const villager = entities.nearestVillager(player.pos, 4.2);
-  if (villager && villager.quest) {
-    const eye = player.eye();
-    const toV = villager.pos.clone().sub(eye).normalize();
-    if (toV.dot(player.forward()) > 0.55) {
-      if (document.exitPointerLock) document.exitPointerLock();
-      Sfx.villager();
-      advancements.trigger('friend');
-      openQuest(villager, quests);
-      return;
-    }
+  const villager = talkableVillager();
+  if (villager) {
+    if (document.exitPointerLock) document.exitPointerLock();
+    Sfx.villager();
+    advancements.trigger('friend');
+    endTutorial();
+    openQuest(villager, quests);
+    return;
   }
 
   const hit = currentTarget();
@@ -6670,7 +7420,7 @@ function useHeld() {
       advancements.trigger('eat');
       renderHotbar(inventory);
       renderBars(player);
-      say('Yum! ' + def.label);
+      say(quests.line('eat', { word: def.label }));
     }
     return;
   }
@@ -6686,6 +7436,15 @@ function useHeld() {
     if (def.block === B.TORCH) advancements.trigger('torch');
     renderHotbar(inventory);
   }
+}
+
+// The villager a right-click would talk to: close, with an errand, and in front
+// of the player. The hint bar and useHeld() must agree on this.
+function talkableVillager() {
+  const v = entities.nearestVillager(player.pos, 4.2);
+  if (!v || !v.quest) return null;
+  const toV = v.pos.clone().sub(player.eye()).normalize();
+  return toV.dot(player.forward()) > 0.55 ? v : null;
 }
 
 function blockIntersectsPlayer(x, y, z) {
@@ -6773,17 +7532,35 @@ function spawnParticles(x, y, z, bdef) {
     p.position.set(x + (rand() - 0.5) * 0.6, y + (rand() - 0.5) * 0.6, z + (rand() - 0.5) * 0.6);
     p.userData.vel.set((rand() - 0.5) * 3, rand() * 3.5, (rand() - 0.5) * 3);
     p.userData.life = 0.7;
+    p.userData.float = false;
     p.visible = true;
     scene.add(p);
     particles.push(p);
   }
 }
 
+// One yellow sparkle over the tutorial villager, from the same pool.
+function spawnSparkle(x, y, z) {
+  let p = particlePool.pop();
+  if (!p) {
+    p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshBasicMaterial());
+    p.userData.vel = new THREE.Vector3();
+  }
+  p.material.color.setHex(0xffd23f);
+  p.position.set(x, y, z);
+  p.userData.vel.set(0, 1.5 + rand(), 0);
+  p.userData.life = 0.6;
+  p.userData.float = true;
+  p.visible = true;
+  scene.add(p);
+  particles.push(p);
+}
+
 function updateParticles(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.userData.life -= dt;
-    p.userData.vel.y -= 22 * dt;
+    if (!p.userData.float) p.userData.vel.y -= 22 * dt;
     p.position.addScaledVector(p.userData.vel, dt);
     if (p.userData.life <= 0) {
       scene.remove(p);
@@ -6805,6 +7582,7 @@ function updateHeldItem(dt) {
     const t = new THREE.TextureLoader().load(itemIcon(held));
     t.magFilter = THREE.NearestFilter;
     t.minFilter = THREE.NearestFilter;
+    if (heldSprite.material.map) heldSprite.material.map.dispose();
     heldSprite.material.map = t;
     heldSprite.material.needsUpdate = true;
   }
@@ -6864,7 +7642,9 @@ function loop(t) {
 
   if (state.started && !state.paused) {
     readMovement();
-    player.update(dt, input);
+    // A pupil reading a villager's errand or crafting should not get hungry
+    // or fall while the dialog is up.
+    if (!anyScreenOpen()) player.update(dt, input);
     world.update(player.pos.x, player.pos.z, 5);
     entities.update(dt, player);
     quests.update(dt);
@@ -6872,10 +7652,12 @@ function loop(t) {
     tickFurnaces(dt);
     updateMining(dt);
     updateParticles(dt);
+    updateTutorial(dt);
     updateFootsteps(dt);
     updateWater();
     updateHeldItem(dt);
     renderBars(player);
+    renderEmeralds(quests.emeralds);
     updateHints();
     if (sky.daylight < 0.35) advancements.trigger('night');
     state.time += dt;
@@ -6891,23 +7673,32 @@ function loop(t) {
   if (state.debug) drawDebug();
 }
 
+
 // A single line of guidance, driven by what is actually in front of the player.
+let lastSignKey = null;
 function updateHints() {
   if (anyScreenOpen()) { hint(null); return; }
-  const v = entities.nearestVillager(player.pos, 4.2);
-  if (v && v.quest) {
-    hint('Right-click to talk to <b>' + (v.name || 'the villager') + '</b>');
+  const v = talkableVillager();
+  if (v) {
+    hint('Right-click to talk to <b>' + escapeHtml(v.name || 'the villager') + '</b>');
+    lastSignKey = null;
     return;
   }
   const hit = currentTarget();
+  const key = hit ? hit.x + ',' + hit.y + ',' + hit.z : null;
+  if (hit && BLOCKS[hit.id].interact === 'sign') {
+    const text = signs.get(key);
+    if (text) {
+      hint('“<b>' + escapeHtml(text) + '</b>”');
+      // Read it once when you look at it, not every frame you keep looking.
+      if (lastSignKey !== key) say(text);
+    } else hint('Right-click the <b>sign</b> to write a word');
+    lastSignKey = key;
+    return;
+  }
+  lastSignKey = null;
   if (hit) {
     const bd = BLOCKS[hit.id];
-    if (bd.interact === 'sign') {
-      const text = signs.get(hit.x + ',' + hit.y + ',' + hit.z);
-      if (text) { hint('“<b>' + text + '</b>”'); say(text); }
-      else hint('Right-click the <b>sign</b> to write a word');
-      return;
-    }
     if (bd.interact === 'crafting_table') { hint('Right-click the <b>Crafting Table</b>'); return; }
     if (bd.interact === 'furnace') { hint('Right-click the <b>Furnace</b>'); return; }
     if (bd.interact === 'chest') { hint('Right-click the <b>Chest</b>'); return; }
@@ -6940,6 +7731,7 @@ function buildSavePayload() {
     seed: state.seed,
     packId: state.packId,
     year: state.year,
+    classCode: state.classCode || getClassCode(),
     pos: [player.pos.x, player.pos.y, player.pos.z],
     yaw: player.yaw, pitch: player.pitch,
     health: player.health, hunger: player.hunger,
@@ -6948,8 +7740,17 @@ function buildSavePayload() {
     deltas: world.serializeDeltas(),
     advancements: advancements.serialize(),
     learned: [...quests.learned],
+    questsCompleted: quests.completed,
+    emeralds: quests.emeralds,
     signs: [...signs],
     chests: [...chests].map(([k, c]) => [k, c.slots.map((x) => (x ? [x.item, x.count] : 0))]),
+    furnaces: [...furnaces].map(([k, f]) => [k, {
+      input: f.input ? [f.input.item, f.input.count] : 0,
+      fuel: f.fuel ? [f.fuel.item, f.fuel.count] : 0,
+      output: f.output ? [f.output.item, f.output.count] : 0,
+      burn: f.burn, burnMax: f.burnMax, cook: f.cook,
+    }]),
+    savedAt: Date.now(),
   };
 }
 
@@ -6961,7 +7762,7 @@ async function saveGame() {
   try {
     const data = buildSavePayload();
     saveLocalSave(name, data);
-    if (isCloudEnabled()) return await saveCloudSave(name, data);
+    if (isCloudEnabled()) return await saveCloudSave(name, data, { classCode: data.classCode });
     return true;
   } catch (e) {
     console.warn('Could not save:', e);
@@ -6984,17 +7785,16 @@ async function loadSaveData(name) {
 }
 
 // ==================================================================== boot
-function boot() {
+async function boot() {
   initRenderer();
   initSpeech();
   initAudio();
-  initSaves();
   initInput();
   buildYearPicker();
   buildPackPicker();
   validateWords();
-  wireMenus();
   initUI({});
+  wireMenus();
   showHud(false);
 
   // Debug/verification handle. Everything the tests need is reachable here.
@@ -7074,6 +7874,10 @@ function boot() {
       return { gen: +gen.toFixed(1), light: +light.toFixed(1), mesh: +mesh.toFixed(1) };
     },
   };
+
+  // Cloud saves load in the background: a school network that blocks the
+  // Firebase CDN must not leave the title screen dead. Local saves work at once.
+  initSaves().then((ok) => { if (ok) updateContinueButton(); });
 }
 
 boot();

@@ -37,6 +37,12 @@ export function initUI(hooks) {
     questText: $('quest-text'), questProgress: $('quest-progress'),
     questAccept: $('quest-accept'), questDeliver: $('quest-deliver'),
     questClose: $('quest-close'), questSpeak: $('quest-speak'),
+    wordbook: $('wordbook-screen'), wordbookGrid: $('wordbook-grid'),
+    wordbookProgress: $('wordbook-progress'), wordbookClose: $('wordbook-close'),
+    teacher: $('teacher-screen'), teacherPin: $('teacher-pin'),
+    teacherClassFilter: $('teacher-class-filter'), teacherExport: $('teacher-export'),
+    teacherStatus: $('teacher-status'), teacherClose: $('teacher-close'),
+    tutorialHint: $('tutorial-hint'), emeralds: $('emeralds'),
   };
 
   // Extra layers the CSS expects but that are pure decoration.
@@ -108,6 +114,15 @@ export function renderBars(player) {
       hunger.appendChild(pip('hunger', Math.max(0, Math.min(1, fd / 2 - i))));
     }
   }
+}
+
+// Emeralds earned from villagers, shown beside the hotbar.
+export function renderEmeralds(n) {
+  const el = UI.el.emeralds;
+  if (!el || el.dataset.n === String(n)) return;
+  el.dataset.n = String(n);
+  el.textContent = '💚 ' + n;
+  el.classList.toggle('hidden', !n);
 }
 
 // --------------------------------------------------------------- hotbar
@@ -204,8 +219,9 @@ function bindSlot(el, get, set, opts = {}) {
 
     if (opts.output) { // crafting / smelting result: take only
       if (!here) return;
+      const limit = ITEMS[here.item] ? ITEMS[here.item].stack : 64;
       if (!cur) setCursor({ item: here.item, count: here.count });
-      else if (stacksEqual(cur, here)) cur.count += here.count;
+      else if (stacksEqual(cur, here) && cur.count + here.count <= limit) cur.count += here.count;
       else return;
       if (opts.onTake) opts.onTake();
       Sfx.craft();
@@ -256,14 +272,16 @@ export function openInventory(mode, context) {
 }
 
 export function closeInventory(inv) {
-  // Anything left in the crafting grid or on the cursor goes back to the bag.
+  // Anything left in the crafting grid or on the cursor goes back to the bag,
+  // or onto the ground if the bag is full.
+  const give = UI.hooks.giveOrDrop || ((item, n) => inv.add(item, n));
   if (UI.context && UI.context.craft) {
     for (let i = 0; i < UI.context.craft.slots.length; i++) {
       const s = UI.context.craft.slots[i];
-      if (s) { inv.add(s.item, s.count); UI.context.craft.slots[i] = null; }
+      if (s) { give(s.item, s.count); UI.context.craft.slots[i] = null; }
     }
   }
-  if (UI.cursor) { inv.add(UI.cursor.item, UI.cursor.count); setCursor(null); }
+  if (UI.cursor) { give(UI.cursor.item, UI.cursor.count); setCursor(null); }
   UI.mode = null;
   UI.context = null;
   UI.el.inv.classList.add('hidden');
@@ -383,25 +401,25 @@ export function openQuest(villager, quests) {
   const have = quests.measure(q, villager);
   const ready = have >= q.count;
 
-  // Highlight the words that carry the meaning.
-  let text = q.text;
-  const kw = q.word.word;
-  text = text.replace(new RegExp('(' + kw + 's?|' + numberWord(q.count) + ')', 'gi'),
-    (m) => '<span class="kw">' + m + '</span>');
-  el.questText.innerHTML = text;
+  el.questText.innerHTML = highlightKeywords(q.text, [q.word.word, numberWord(q.count)]);
 
-  if (q.type === 'find') {
+  // The year's own one-line reminder of what to do, plus a tally where
+  // there is something to count.
+  const hintLine = escapeHtml(q.hint || '');
+  if (q.type === 'find' || q.type === 'visit') {
     el.questProgress.innerHTML = ready
-      ? '<span class="ok">✔ You found it!</span>'
-      : 'Go and look for a ' + (q.findName || kw) + '.';
+      ? '<span class="ok">✔ ' + escapeHtml(quests.line(q.type === 'find' ? 'found' : 'visited',
+        Object.assign({}, q.vars, { mob: q.findName || q.word.word }))) + '</span>'
+      : hintLine;
   } else {
     el.questProgress.innerHTML =
-      (ready ? '<span class="ok">✔ ' : '') + have + ' / ' + q.count + (ready ? '</span>' : '');
+      (ready ? '<span class="ok">✔ ' : '') + have + ' / ' + q.count + (ready ? '</span>' : '') +
+      (hintLine && !ready ? '<br><span class="quest-hint">' + hintLine + '</span>' : '');
   }
 
   el.questAccept.classList.toggle('hidden', ready);
   el.questDeliver.classList.toggle('hidden', !ready);
-  el.questDeliver.textContent = q.type === 'find' ? 'I found it!' : 'Here you are!';
+  el.questDeliver.textContent = (q.type === 'find' || q.type === 'visit') ? 'I found it!' : 'Here you are!';
 
   quests.speakQuest(q, villager);
   el.questSpeak.onclick = () => quests.speakQuest(q, villager);
@@ -411,15 +429,31 @@ export function openQuest(villager, quests) {
     if (quests.deliver(q, villager)) {
       const rewardText = (q.reward || []).map(([it, n]) => n + ' × ' + itemLabel(it)).join(', ');
       el.questVisual.textContent = '🎉';
-      el.questText.innerHTML = 'Thank you! Well done!';
-      el.questProgress.innerHTML = '<span class="quest-reward">You got: ' + rewardText + '</span>';
+      el.questText.textContent = q.praise || 'Well done!';
+      el.questProgress.innerHTML = '<span class="quest-reward">You got: ' + escapeHtml(rewardText) + '</span>';
       el.questDeliver.classList.add('hidden');
       el.questAccept.classList.remove('hidden');
       el.questAccept.textContent = 'Bye!';
-      sayLines(['Thank you! Well done!', q.word.sentence || ''], { narrative: true });
+      sayLines([q.praise || 'Well done!', q.word.sentence || ''], { narrative: true });
       Sfx.levelUp();
     }
   };
+}
+
+export function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Wrap whole-word matches of the key words (and simple plurals) in a
+// highlight, so "one" lights up in "one apple" but not inside "stone".
+function highlightKeywords(text, words) {
+  const safe = escapeHtml(text);
+  const alts = words.filter(Boolean)
+    .map((w) => String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length);
+  if (!alts.length) return safe;
+  const re = new RegExp('\\b(' + alts.join('|') + ')(e?s)?\\b', 'gi');
+  return safe.replace(re, (m) => '<span class="kw">' + m + '</span>');
 }
 
 export function closeQuest() {
@@ -429,6 +463,51 @@ export function closeQuest() {
 }
 
 export function questOpen() { return !UI.el.quest.classList.contains('hidden'); }
+
+// --------------------------------------------------------------- word book
+export function openWordBook(quests) {
+  const el = UI.el;
+  const list = quests.wordList();
+  const learned = list.filter((w) => w.learned).length;
+  el.wordbookProgress.textContent = learned + ' / ' + list.length + ' words learned';
+  el.wordbookGrid.innerHTML = '';
+  list.forEach((w) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wordbook-card' + (w.learned ? ' learned' : '');
+    btn.innerHTML = '<span class="wb-emoji">' + (w.emoji || '❓') + '</span><span class="wb-word">' + w.word + '</span>';
+    btn.onclick = () => say(w.word, { force: true });
+    el.wordbookGrid.appendChild(btn);
+  });
+  el.wordbook.classList.remove('hidden');
+  if (document.exitPointerLock) document.exitPointerLock();
+}
+
+export function closeWordBook() {
+  UI.el.wordbook.classList.add('hidden');
+  if (UI.hooks.onCloseScreen) UI.hooks.onCloseScreen();
+}
+
+export function wordbookOpen() { return !UI.el.wordbook.classList.contains('hidden'); }
+
+// -------------------------------------------------------------- teacher
+export function openTeacher() {
+  const el = UI.el;
+  el.teacherPin.value = '';
+  el.teacherStatus.textContent = '';
+  el.teacher.classList.remove('hidden');
+  el.teacherPin.focus();
+}
+
+export function closeTeacher() {
+  UI.el.teacher.classList.add('hidden');
+}
+
+export function teacherOpen() { return !UI.el.teacher.classList.contains('hidden'); }
+
+export function setTutorialHint(on) {
+  UI.el.tutorialHint.classList.toggle('hidden', !on);
+}
 
 // ------------------------------------------------------------------ signs
 // Writing a word on a sign is the one place children type English. The word
@@ -492,5 +571,7 @@ export function anyScreenOpen() {
          !UI.el.quest.classList.contains('hidden') ||
          !UI.el.sign.classList.contains('hidden') ||
          !UI.el.pause.classList.contains('hidden') ||
-         !UI.el.title.classList.contains('hidden');
+         !UI.el.title.classList.contains('hidden') ||
+         !UI.el.wordbook.classList.contains('hidden') ||
+         !UI.el.teacher.classList.contains('hidden');
 }

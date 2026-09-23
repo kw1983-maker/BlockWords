@@ -5,7 +5,7 @@
 // Everything the villagers ask for is generated from this file, so adding a
 // word here immediately creates new quests. There are two tables:
 //
-//   YEARS  — one entry per school year (1, 2, 4). A year decides HOW a villager
+//   YEARS  — one entry per school year (1, 2, 3, 4). A year decides HOW a villager
 //            speaks: the sentence templates, and how many things it asks for.
 //   PACKS  — one entry per topic. A pack decides WHAT the villager talks about,
 //            and which years it is offered to.
@@ -70,11 +70,17 @@
 //   {it}        "it" for one, "them" for more than one
 //   {name}      the villager's name
 //
+// Besides fetch / fetchU / find / place / visit, a year's `lines` may also
+// override the shared feedback lines in COMMON_LINES: found, visited, goBack
+// and eat. `hints` is the one-line reminder shown in the villager's dialog, and
+// `praise` is what the villager says when the job is done.
+//
 // A template that already contains {sentence} is not followed by the model
 // sentence a second time.
 //
 // The books these packs follow:
 //   Year 1 & 2 — Super Minds 1 (Cambridge), Starter + Units 1–9
+//   Year 3     — Get Smart Plus 3 (MM Publications)
 //   Year 4     — Get Smart Plus 4 (MM Publications / KPM 2019), Modules 1–10
 // Both PDFs sit in the project root.
 //
@@ -87,6 +93,15 @@
 // grammar Get Smart Plus 4 actually drills — some/any, how many/how much,
 // should, the past simple and comparatives.
 
+// Lines every year shares unless it writes its own under `lines` (same keys).
+// Used for the feedback around an errand rather than the errand itself.
+export const COMMON_LINES = {
+  found: ['You found a {mob}!'],          // a "find" errand is done
+  visited: ['You found the {word}!'],     // a "visit" errand is done
+  goBack: ['Go back to {name}.'],         // …and where to go next
+  eat: ['Yum! {word}.'],                  // eating something
+};
+
 export const YEARS = [
   {
     id: 1,
@@ -94,7 +109,7 @@ export const YEARS = [
     emoji: '🐣',
     book: 'Super Minds 1 · Starter–Unit 4',
     blurb: 'short sentences, 1–3 things',
-    counts: { fetch: [1, 3], place: [1, 3] },
+    counts: { fetch: [1, 3], place: [1, 3], visit: [1, 1] },
     leadWord: true,          // say the bare word first, so they hear it clean
     lines: {
       fetch: [
@@ -115,11 +130,16 @@ export const YEARS = [
         'Put {n} {what} next to me.',
         'Look at me. Put {n} {what} here, please.',
       ],
+      visit: [
+        'Look! Can you find the {word}?',
+        'Go to the {word}, please.',
+      ],
     },
     hints: {
       fetch: 'Find {n} {what}. Then come back to me.',
       find: 'Walk and look. Stand next to the {mob}.',
       place: 'Put {n} {what} on the ground next to me.',
+      visit: 'Go to the {word}. Stand there.',
     },
     praise: ['Well done!', 'Very good!', 'Thank you! Good job!'],
   },
@@ -129,7 +149,7 @@ export const YEARS = [
     emoji: '🦉',
     book: 'Super Minds 1 · Units 5–9',
     blurb: 'there is / there are, 2–5 things',
-    counts: { fetch: [2, 5], place: [2, 6] },
+    counts: { fetch: [2, 5], place: [2, 6], visit: [1, 1] },
     leadWord: false,
     lines: {
       fetch: [
@@ -151,11 +171,16 @@ export const YEARS = [
         'Where are the {many}? Put {n} {what} here, please.',
         "Let's build together. Put {n} {what} next to me.",
       ],
+      visit: [
+        "Where's the {word}? Go and find it!",
+        'Can you visit the {word}? Come back when you are there.',
+      ],
     },
     hints: {
       fetch: 'Find {n} {what} and bring {it} back to me.',
       find: 'Walk around and look. Stand next to the {mob}.',
       place: 'Put {n} {what} on the ground near me.',
+      visit: 'Walk to the {word} and stand there.',
     },
     praise: [
       'Well done! That was very good.',
@@ -164,12 +189,54 @@ export const YEARS = [
     ],
   },
   {
+    id: 3,
+    label: 'Year 3',
+    emoji: '🌟',
+    book: 'Get Smart Plus 3',
+    blurb: 'describing places, 3–6 things',
+    counts: { fetch: [3, 6], place: [3, 8], visit: [1, 1] },
+    leadWord: false,
+    lines: {
+      fetch: [
+        'Please bring me {n} {what}. I need them for our lesson.',
+        'Can you find {n} {what}? Put them in my bag, please.',
+      ],
+      fetchU: [
+        'How much {word} do we need? About {n} {what}, please.',
+      ],
+      find: [
+        'Look for a {mob}. Tell me when you find one.',
+        'Is there a {mob} near here? Go and see!',
+      ],
+      place: [
+        'Put {n} {what} here, next to me.',
+        'We need {n} {what}. Place them on the ground, please.',
+      ],
+      visit: [
+        'Can you find the {word}? Go there and come back to me.',
+        'We are learning about {word}. Please visit the {word}.',
+        'Go to the {word}. Stand there, then come back.',
+      ],
+    },
+    hints: {
+      fetch: 'Find {n} {what} and bring {it} back.',
+      find: 'Walk around. Stand next to the {mob}.',
+      place: 'Put {n} {what} on the ground near me.',
+      visit: 'Go to the {word}. Stand there for a moment.',
+    },
+    praise: [
+      'Well done! Good exploring.',
+      'Thank you! You found it.',
+      'Great job! You are learning well.',
+    ],
+  },
+  {
     id: 4,
     label: 'Year 4',
     emoji: '🚀',
     book: 'Get Smart Plus 4',
     blurb: 'some / any, past simple, 4–10 things',
-    counts: { fetch: [4, 10], place: [5, 12] },
+    counts: { fetch: [4, 10], place: [5, 12], visit: [1, 1] },
     leadWord: false,
     lines: {
       fetch: [
@@ -192,11 +259,16 @@ export const YEARS = [
         'We should build something together. Put {n} {what} next to me, please.',
         'How many {many} do we need? {n}, I think. Put them down here.',
       ],
+      visit: [
+        'We are learning about the {word}. Please go there and come back.',
+        'Can you find the {word}? Visit it, then tell me.',
+      ],
     },
     hints: {
       fetch: 'Collect {n} {what}, then bring {it} back to me.',
       find: 'Search around. Stand next to a {mob} to finish the job.',
       place: 'Place {n} {what} on the ground close to me.',
+      visit: 'Walk to the {word} and stand there for a moment.',
     },
     praise: [
       'Thank you! You helped me. That was very kind.',
@@ -281,7 +353,7 @@ export const PACKS = [
       { word: 'box', emoji: '📦', sentence: 'My things are in the box.', item: 'chest', block: 'chest', one: 'box', many: 'boxes' },
       { word: 'lamp', emoji: '💡', sentence: 'The lamp is bright.', item: 'torch', block: 'torch', one: 'lamp', many: 'lamps' },
       { word: 'sign', emoji: '🪧', sentence: "What's this? It's a sign.", item: 'sign', block: 'sign' },
-      { word: 'pencil', emoji: '✏️', sentence: "It's a pencil." },
+      { word: 'pencil', emoji: '✏️', sentence: "It's a pencil.", proxyItem: 'stick', one: 'stick', many: 'sticks' },
       { word: 'pen', emoji: '🖊️', sentence: 'Is it a pen? Yes, it is.' },
     ],
   },
@@ -355,7 +427,7 @@ export const PACKS = [
       { word: 'box', emoji: '📦', sentence: 'I put my things in the box.', item: 'chest', block: 'chest' },
       { word: 'table', emoji: '🪑', sentence: 'I work at the table.', item: 'crafting_table', block: 'crafting_table' },
       { word: 'lamp', emoji: '💡', sentence: 'The lamp is bright.', item: 'torch', block: 'torch' },
-      { word: 'door', emoji: '🚪', sentence: 'Open the door, please.' },
+      { word: 'door', emoji: '🚪', sentence: 'Open the door, please.', visit: 'village' },
       { word: 'floor', emoji: '⬛', sentence: 'The floor is under my feet.', item: 'stone', block: 'stone', one: 'floor block', many: 'floor blocks' },
     ],
   },
@@ -403,9 +475,9 @@ export const PACKS = [
       { word: 'cactus', emoji: '🌵', sentence: 'The cactus is green and sharp.', item: 'cactus', block: 'cactus', many: 'cactuses' },
       { word: 'sugar cane', emoji: '🎋', sentence: 'Sugar cane grows by the sea.', item: 'sugar_cane', one: 'sugar cane', many: 'sugar canes' },
       { word: 'glass', emoji: '🫙', sentence: 'The glass is made from sand.', item: 'glass', block: 'glass', count: [2, 4], one: 'glass block', many: 'glass blocks' },
-      { word: 'sea', emoji: '🌊', sentence: "Let's swim in the sea!" },
-      { word: 'sun', emoji: '☀️', sentence: 'The sun is hot today.' },
-      { word: 'shell', emoji: '🐚', sentence: "Where's the shell? It's in the sand." },
+      { word: 'sea', emoji: '🌊', sentence: "Let's swim in the sea!", visit: 'sea' },
+      { word: 'sun', emoji: '☀️', sentence: 'The sun is hot today.', visit: 'sun' },
+      { word: 'shell', emoji: '🐚', sentence: "Where's the shell? It's in the sand.", visit: 'shell' },
       { word: 'boat', emoji: '⛵', sentence: 'The boat is on the water.' },
     ],
   },
@@ -424,6 +496,36 @@ export const PACKS = [
       { word: 'stick', emoji: '🥢', sentence: 'I need two sticks.', item: 'stick' },
       { word: 'iron', emoji: '⚙️', sentence: 'Iron is strong.', item: 'iron_ingot', one: 'iron bar', many: 'iron bars', count: [1, 4] },
       { word: 'torch', emoji: '🔥', sentence: 'The torch makes light.', item: 'torch', block: 'torch' },
+    ],
+  },
+
+  // ===================================================== Year 3 =============
+  {
+    id: 'places',
+    name: 'Places',
+    emoji: '🏘️',
+    blurb: 'town, park, beach, river…',
+    years: [3],
+    book: 'Get Smart Plus 3',
+    lines: {
+      visit: [
+        'We are learning about the {word}. Please go there and come back.',
+        'Can you find the {word}? Visit it, then tell me.',
+      ],
+      fetch: [
+        'Our town needs {n} {what}. Can you bring them, please?',
+        'Please find {n} {what} for our lesson.',
+      ],
+    },
+    words: [
+      { word: 'town', emoji: '🏘️', sentence: 'I live in a town.', visit: 'village' },
+      { word: 'park', emoji: '🌳', sentence: 'We play in the park.', visit: 'grass' },
+      { word: 'beach', emoji: '🏖️', sentence: 'The beach is fun.', visit: 'shell' },
+      { word: 'river', emoji: '🏞️', sentence: 'The river has water.', visit: 'water' },
+      { word: 'shop', emoji: '🏪', sentence: 'We buy food at the shop.', item: 'bread', count: [2, 4] },
+      { word: 'street', emoji: '🛣️', sentence: 'The street is long.', item: 'cobblestone', block: 'cobblestone', one: 'street stone', many: 'street stones' },
+      { word: 'bridge', emoji: '🌉', sentence: 'Walk over the bridge.', item: 'oak_planks', block: 'oak_planks', one: 'bridge plank', many: 'bridge planks' },
+      { word: 'hill', emoji: '⛰️', sentence: 'The hill is high.', visit: 'sun' },
     ],
   },
 
@@ -461,8 +563,8 @@ export const PACKS = [
       { word: 'sand', emoji: '🏜️', sentence: 'The wind covered the tomb with sand.', item: 'sand', block: 'sand', one: 'sand block', many: 'sand blocks' },
       { word: 'stone', emoji: '🪨', sentence: 'They cut the stone with simple tools.', item: 'cobblestone', block: 'cobblestone', one: 'stone block', many: 'stone blocks' },
       { word: 'jewel', emoji: '💚', sentence: 'The queen wore a green jewel.', item: 'emerald', count: [1, 3] },
-      { word: 'desert', emoji: '🐫', sentence: 'The desert was hot and dry.' },
-      { word: 'mummy', emoji: '🧟', sentence: 'They wrapped the mummy in bandages.' },
+      { word: 'desert', emoji: '🐫', sentence: 'The desert was hot and dry.', visit: 'desert' },
+      { word: 'mummy', emoji: '🧟', sentence: 'They wrapped the mummy in bandages.', visit: 'desert' },
     ],
   },
   {
@@ -597,8 +699,8 @@ export const PACKS = [
       { word: 'wool', emoji: '🧶', sentence: 'My jumper is made of wool.', item: 'white_wool', block: 'white_wool', count: [2, 4], one: 'wool block', many: 'wool blocks' },
       { word: 'leather', emoji: '🟤', sentence: 'The bag is made of leather.', item: 'leather', count: [1, 4], one: 'piece of leather', many: 'pieces of leather', uncountable: true },
       { word: 'gold', emoji: '🪙', sentence: 'Gold is more expensive than iron.', item: 'gold_ingot', one: 'gold bar', many: 'gold bars', count: [1, 4] },
-      { word: 'plastic', emoji: '🧴', sentence: 'We should not throw plastic away.' },
-      { word: 'paper', emoji: '📄', sentence: 'Paper is easy to recycle.' },
+      { word: 'plastic', emoji: '🧴', sentence: 'We should not throw plastic away.', visit: 'water' },
+      { word: 'paper', emoji: '📄', sentence: 'Paper is easy to recycle.', proxyItem: 'bookshelf', one: 'book', many: 'books' },
     ],
   },
 ];
@@ -618,7 +720,11 @@ export const NUMBER_WORDS = [
 export const ORDINAL_WORDS = [
   'zeroth', 'first', 'second', 'third', 'fourth', 'fifth',
   'sixth', 'seventh', 'eighth', 'ninth', 'tenth',
-  'eleventh', 'twelfth',
+  'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth',
+  'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth',
+  'twenty-first', 'twenty-second', 'twenty-third', 'twenty-fourth', 'twenty-fifth',
+  'twenty-sixth', 'twenty-seventh', 'twenty-eighth', 'twenty-ninth', 'thirtieth',
+  'thirty-first',
 ];
 
 export function numberWord(n) {
@@ -670,6 +776,8 @@ export function fillLine(tpl, vars) {
     .replace(/\s+/g, ' ')
     .replace(/ ([.,!?])/g, '$1')
     .trim()
+    // "a orange sheep" → "an orange sheep", whatever word filled the slot.
+    .replace(/\b([Aa]) (?=(?:[aeio]|u(?!ni|se|su))\w)/gi, (m, a) => a + 'n ')
     // A placeholder can land at the start of a sentence ("How many? Six, I
     // think."), so capitalise there rather than making every template avoid it.
     .replace(/(^|[.!?]\s+)([a-z])/g, (m, lead, c) => lead + c.toUpperCase());
@@ -679,7 +787,8 @@ export function fillLine(tpl, vars) {
 // year's own list is used. `fetchU` (uncountable) falls back to `fetch`.
 export function linesFor(pack, year, type) {
   const packLines = pack && pack.lines;
-  const list = (packLines && packLines[type]) || (year && year.lines && year.lines[type]);
+  const list = (packLines && packLines[type]) || (year && year.lines && year.lines[type])
+    || COMMON_LINES[type];
   if (!list && type === 'fetchU') return linesFor(pack, year, 'fetch');
   return list || [];
 }

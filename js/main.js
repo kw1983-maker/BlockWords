@@ -14,19 +14,20 @@ import { Inventory, SlotSet, HOTBAR_SIZE } from './inventory.js';
 import { Player, PLAYER_CONST } from './player.js';
 import { Entities, MOB_TYPES } from './entities.js';
 import { Sky, DAY_LENGTH } from './sky.js';
-import { initAudio, resumeAudio, startMusic, setMusicEnabled, Sfx, materialOf, Audio } from './audio.js';
+import { initAudio, resumeAudio, startMusic, setMusicEnabled, Sfx, materialOf } from './audio.js';
 import { initSpeech, say, sayLines, setSpeechEnabled, Speech } from './speech.js';
 import { PACKS, YEARS, packById, packsForYear, defaultPackForYear } from './words.js';
 import { QuestSystem, Advancements, validateWords } from './quests.js';
 import {
   UI, initUI, renderHotbar, renderBars, announceItem, toast, hint, flashHurt,
-  setUnderwater, openInventory, closeInventory, redrawInventory, openQuest,
+  setUnderwater, renderEmeralds, escapeHtml, openInventory, closeInventory, redrawInventory, openQuest,
   closeQuest, questOpen, openSign, signOpen, updateDebug, setDebugVisible, showTitle, showLoading,
-  showPause, showHud, anyScreenOpen,
+  showPause, showHud, anyScreenOpen, openWordBook, closeWordBook, wordbookOpen,
+  openTeacher, closeTeacher, teacherOpen, setTutorialHint,
 } from './ui.js';
 import {
   initSaves, normalizeName, localSaveKey, isCloudEnabled,
-  hasCloudSave, loadCloudSave, saveCloudSave,
+  hasCloudSave, loadCloudSave, saveCloudSave, exportTeacherCsv,
 } from './saves.js';
 
 const state = {
@@ -36,6 +37,7 @@ const state = {
   packId: 'animals',
   year: 1,
   playerName: '',
+  classCode: '',
   renderDistance: 6,
   thirdPerson: 0,   // 0 = first person, 1 = behind, 2 = in front
   debug: false,
@@ -43,6 +45,8 @@ const state = {
 };
 
 let nameCheckTimer = null;
+let tutorialTimer = 0;
+let tutorialVillager = null;
 
 const input = {
   forward: 0, strafe: 0, jump: false, sneak: false, sprint: false,
@@ -156,6 +160,7 @@ function buildYearPicker() {
   YEARS.forEach((y) => {
     const b = document.createElement('button');
     b.className = 'pack-btn year-btn' + (y.id === state.year ? ' sel' : '');
+    b.setAttribute('aria-pressed', String(y.id === state.year));
     b.innerHTML = '<span class="pack-emoji"></span><span class="pack-word"></span>'
       + '<span class="pack-blurb"></span><span class="pack-book"></span>';
     b.querySelector('.pack-emoji').textContent = y.emoji;
@@ -165,8 +170,9 @@ function buildYearPicker() {
     b.onclick = () => {
       state.year = y.id;
       state.packId = defaultPackForYear(y.id);
-      [...box.children].forEach((c) => c.classList.remove('sel'));
+      [...box.children].forEach((c) => { c.classList.remove('sel'); c.setAttribute('aria-pressed', 'false'); });
       b.classList.add('sel');
+      b.setAttribute('aria-pressed', 'true');
       buildPackPicker();
       say(y.label);
     };
@@ -183,6 +189,7 @@ function buildPackPicker() {
   packs.forEach((p) => {
     const b = document.createElement('button');
     b.className = 'pack-btn' + (p.id === state.packId ? ' sel' : '');
+    b.setAttribute('aria-pressed', String(p.id === state.packId));
     b.innerHTML = '<span class="pack-emoji"></span><span class="pack-word"></span>'
       + '<span class="pack-blurb"></span><span class="pack-book"></span>';
     b.querySelector('.pack-emoji').textContent = p.emoji;
@@ -191,12 +198,38 @@ function buildPackPicker() {
     b.querySelector('.pack-book').textContent = p.book || '';
     b.onclick = () => {
       state.packId = p.id;
-      [...box.children].forEach((c) => c.classList.remove('sel'));
+      [...box.children].forEach((c) => { c.classList.remove('sel'); c.setAttribute('aria-pressed', 'false'); });
       b.classList.add('sel');
+      b.setAttribute('aria-pressed', 'true');
       say(p.name);
     };
     box.appendChild(b);
   });
+}
+
+function getClassCode() {
+  const el = document.getElementById('class-input');
+  return el ? el.value.trim().slice(0, 16) : '';
+}
+
+function applyUiScale(scale) {
+  const s = Math.max(1, Math.min(1.3, Number(scale) || 1));
+  document.documentElement.style.setProperty('--ui-scale', String(s));
+  localStorage.setItem('blockwords.uiScale', String(s));
+}
+
+function getTeacherPin() {
+  return (typeof TEACHER_PIN !== 'undefined' && TEACHER_PIN) ? String(TEACHER_PIN) : '4826';
+}
+
+function downloadCsv(filename, text) {
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function getPlayerName() {
@@ -221,23 +254,55 @@ function saveLocalSave(name, data) {
   }
 }
 
+// Shows Continue only when this name has a world, and says which class and
+// word pack that world will load — a save keeps its own year and pack.
+let continueCheck = 0;
 async function updateContinueButton() {
   const cont = document.getElementById('btn-continue');
+  const info = document.getElementById('continue-info');
   if (!cont) return;
+  const token = ++continueCheck;
   const name = getPlayerName();
-  if (!normalizeName(name)) {
-    cont.classList.add('hidden');
-    return;
+  disarmPlay();
+  let saved = normalizeName(name) ? loadLocalSave(name) : null;
+  if (!saved && normalizeName(name) && isCloudEnabled()) saved = await loadCloudSave(name);
+  if (token !== continueCheck) return;   // the name changed while we waited
+  cont.classList.toggle('hidden', !saved);
+  if (info) {
+    info.classList.toggle('hidden', !saved);
+    if (saved) {
+      const y = YEARS.find((x) => x.id === saved.year);
+      const pk = packById(saved.packId);
+      info.textContent = 'Saved world: ' + [y && y.label, pk && pk.name].filter(Boolean).join(' · ');
+    }
   }
-  let exists = !!loadLocalSave(name);
-  if (!exists && isCloudEnabled()) exists = await hasCloudSave(name);
-  cont.classList.toggle('hidden', !exists);
+}
+
+// Play on a name that already has a world needs a second, deliberate click.
+let playArmed = false;
+function disarmPlay() {
+  playArmed = false;
+  const b = document.getElementById('btn-play');
+  if (b) { b.textContent = 'Play'; b.classList.remove('armed'); }
 }
 
 function wireMenus() {
   const nameInput = document.getElementById('name-input');
+  const classInput = document.getElementById('class-input');
   const savedName = localStorage.getItem('blockwords.playerName');
+  const savedClass = localStorage.getItem('blockwords.classCode');
+  const savedScale = localStorage.getItem('blockwords.uiScale');
   if (savedName && nameInput) nameInput.value = savedName;
+  if (savedClass && classInput) classInput.value = savedClass;
+  const scaleSel = document.getElementById('opt-ui-scale');
+  if (scaleSel) {
+    scaleSel.value = savedScale || '1';
+    applyUiScale(scaleSel.value);
+    scaleSel.onchange = () => applyUiScale(scaleSel.value);
+  }
+  classInput?.addEventListener('input', () => {
+    localStorage.setItem('blockwords.classCode', getClassCode());
+  });
 
   nameInput?.addEventListener('input', () => {
     clearTimeout(nameCheckTimer);
@@ -252,17 +317,19 @@ function wireMenus() {
       return;
     }
     state.playerName = name;
+    state.classCode = getClassCode();
     localStorage.setItem('blockwords.playerName', name);
-    if (isCloudEnabled() && await hasCloudSave(name)) {
-      const display = name.trim();
-      toast('Save found', `${display} already has a world — tap Continue instead.`, '💾');
+    localStorage.setItem('blockwords.classCode', state.classCode);
+    const hasSave = !!loadLocalSave(name) || (isCloudEnabled() && await hasCloudSave(name));
+    if (hasSave && !playArmed) {
+      playArmed = true;
+      const b = document.getElementById('btn-play');
+      b.textContent = 'Start a NEW world? Click again';
+      b.classList.add('armed');
+      toast('Save found', `${name.trim()} already has a world. Tap Continue to keep it, or click again to start a new one.`, '💾');
       return;
     }
-    if (loadLocalSave(name)) {
-      const display = name.trim();
-      toast('Save found', `${display} already has a world — tap Continue instead.`, '💾');
-      return;
-    }
+    disarmPlay();
     const seedText = document.getElementById('seed-input').value.trim();
     startGame(seedFromString(seedText), null);
   };
@@ -276,7 +343,9 @@ function wireMenus() {
       return;
     }
     state.playerName = name;
+    state.classCode = getClassCode();
     localStorage.setItem('blockwords.playerName', name);
+    localStorage.setItem('blockwords.classCode', state.classCode);
     cont.disabled = true;
     const saved = await loadSaveData(name);
     cont.disabled = false;
@@ -289,14 +358,25 @@ function wireMenus() {
 
   updateContinueButton();
 
+  // Sound choices are remembered per browser, like the screen size.
   const speechBoxes = [document.getElementById('opt-speech'), document.getElementById('opt-speech2')];
+  const speechOn = localStorage.getItem('blockwords.speech') !== '0';
+  setSpeechEnabled(speechOn);
   speechBoxes.forEach((cb) => {
+    cb.checked = speechOn;
     cb.onchange = () => {
       setSpeechEnabled(cb.checked);
+      localStorage.setItem('blockwords.speech', cb.checked ? '1' : '0');
       speechBoxes.forEach((o) => { o.checked = cb.checked; });
     };
   });
-  document.getElementById('opt-music').onchange = (e) => setMusicEnabled(e.target.checked);
+  const musicBox = document.getElementById('opt-music');
+  musicBox.checked = localStorage.getItem('blockwords.music') !== '0';
+  setMusicEnabled(musicBox.checked);
+  musicBox.onchange = () => {
+    setMusicEnabled(musicBox.checked);
+    localStorage.setItem('blockwords.music', musicBox.checked ? '1' : '0');
+  };
   const dist = document.getElementById('opt-dist');
   dist.oninput = () => {
     state.renderDistance = +dist.value;
@@ -313,6 +393,33 @@ function wireMenus() {
   document.getElementById('btn-quit').onclick = () => {
     saveGame().then(() => { location.reload(); });
   };
+
+  document.getElementById('btn-wordbook')?.addEventListener('click', () => {
+    if (!state.started || !quests) return;
+    showWordBook(true);
+  });
+  document.getElementById('wordbook-close')?.addEventListener('click', hideWordBook);
+
+  document.getElementById('btn-teacher')?.addEventListener('click', () => openTeacher());
+  document.getElementById('teacher-close')?.addEventListener('click', () => closeTeacher());
+  document.getElementById('teacher-export')?.addEventListener('click', async () => {
+    const pin = document.getElementById('teacher-pin')?.value || '';
+    const status = document.getElementById('teacher-status');
+    if (pin !== getTeacherPin()) {
+      if (status) status.textContent = 'Wrong PIN.';
+      return;
+    }
+    if (status) status.textContent = 'Preparing export…';
+    try {
+      const filter = document.getElementById('teacher-class-filter')?.value.trim() || '';
+      const csv = await exportTeacherCsv(filter);
+      downloadCsv('blockwords-progress.csv', csv);
+      if (status) status.textContent = 'Download started.';
+    } catch (e) {
+      if (status) status.textContent = 'Export failed.';
+      console.warn(e);
+    }
+  });
 }
 
 // ================================================================= new game
@@ -322,6 +429,7 @@ function startGame(seed, saved) {
   state.seed = seed >>> 0;
   if (saved && saved.year) state.year = saved.year;
   if (saved && saved.packId) state.packId = saved.packId;
+  state.classCode = (saved && saved.classCode) ? saved.classCode : getClassCode();
   if (saved && saved.playerName) {
     state.playerName = saved.playerName;
     localStorage.setItem('blockwords.playerName', saved.playerName);
@@ -355,7 +463,7 @@ function startGame(seed, saved) {
   sky = new Sky(scene, materials);
   sky.setFogDistance(state.renderDistance);
   entities = new Entities(world, scene, state.seed);
-  quests = new QuestSystem(state.packId, state.year, entities, player, inventory, world);
+  quests = new QuestSystem(state.packId, state.year, entities, player, inventory, world, sky);
 
   wireCallbacks();
   initHelpers();
@@ -372,12 +480,28 @@ function startGame(seed, saved) {
     advancements.load(saved.advancements);
     if (saved.time !== undefined) sky.time = saved.time;
     if (saved.learned) saved.learned.forEach((w) => quests.learned.add(w));
+    if (saved.questsCompleted !== undefined) quests.completed = saved.questsCompleted;
+    if (saved.emeralds !== undefined) quests.emeralds = saved.emeralds;
+    if (saved.classCode) {
+      state.classCode = saved.classCode;
+      const cc = document.getElementById('class-input');
+      if (cc) cc.value = saved.classCode;
+    }
     if (saved.signs) for (const [k, t] of saved.signs) signs.set(k, t);
     if (saved.chests) {
       for (const [k, arr] of saved.chests) {
         const set = new SlotSet(27);
         arr.forEach((v, i) => { if (v && ITEMS[v[0]]) set.slots[i] = { item: v[0], count: v[1] }; });
         chests.set(k, set);
+      }
+    }
+    if (saved.furnaces) {
+      const stack = (v) => (v && ITEMS[v[0]] ? { item: v[0], count: v[1] } : null);
+      for (const [k, f] of saved.furnaces) {
+        furnaces.set(k, {
+          input: stack(f.input), fuel: stack(f.fuel), output: stack(f.output),
+          burn: f.burn || 0, burnMax: f.burnMax || 1, cook: f.cook || 0, cookMax: 8,
+        });
       }
     }
   } else {
@@ -427,7 +551,49 @@ function finishStart(freshSpawn) {
 
   sayLines(['Welcome to Block Words!', 'Find a villager and listen to the job.'], { narrative: true });
   toast('Welcome!', 'Explore, mine and build. Talk to villagers.', '🌍');
+  if (freshSpawn) startTutorial();
   requestPointerLock();
+}
+
+function startTutorial() {
+  if (localStorage.getItem('blockwords.tutorialDone')) return;
+  setTutorialHint(true);
+  tutorialTimer = 120;   // fallback only — talking to a villager ends it
+  let best = Infinity;
+  tutorialVillager = null;
+  for (const v of entities.villagers) {
+    const d = v.pos.distanceTo(player.pos);
+    if (d < best) { best = d; tutorialVillager = v; }
+  }
+  say('Walk to a villager with an exclamation mark. Right-click to hear the job.', { narrative: true });
+}
+
+function endTutorial() {
+  if (tutorialTimer <= 0) return;
+  tutorialTimer = 0;
+  setTutorialHint(false);
+  localStorage.setItem('blockwords.tutorialDone', '1');
+  tutorialVillager = null;
+}
+
+function updateTutorial(dt) {
+  if (tutorialTimer <= 0) return;
+  tutorialTimer -= dt;
+  if (tutorialTimer <= 0) { tutorialTimer = 1; endTutorial(); return; }
+  // Never cover a dialog's buttons.
+  setTutorialHint(!anyScreenOpen());
+  // Villagers load in after the first frames, so keep looking for the nearest.
+  if (!tutorialVillager) {
+    let best = 48;
+    for (const v of entities.villagers) {
+      const d = v.pos.distanceTo(player.pos);
+      if (d < best) { best = d; tutorialVillager = v; }
+    }
+  }
+  if (tutorialVillager) {
+    const p = tutorialVillager.pos;
+    spawnSparkle(p.x + (rand() - 0.5) * 0.5, p.y + 2.2 + rand() * 0.4, p.z + (rand() - 0.5) * 0.5);
+  }
 }
 
 function wireCallbacks() {
@@ -448,6 +614,7 @@ function wireCallbacks() {
   };
   entities.onVillagerReady = (v) => quests.assign(v);
 
+  quests.give = giveOrDrop;
   quests.onToast = (t, s, e) => toast(t, s, e, 'quest');
   quests.onQuestDone = (q) => {
     toast(q.praise || 'Well done!', 'You finished: ' + q.text, q.emoji, 'quest');
@@ -471,7 +638,17 @@ function wireCallbacks() {
       renderHotbar(inventory);
     },
     onCloseScreen: () => requestPointerLock(),
+    giveOrDrop,
   });
+}
+
+// Put items in the bag; whatever does not fit lands at the player's feet
+// instead of silently disappearing.
+function giveOrDrop(item, count) {
+  const left = inventory.add(item, count);
+  if (left > 0) entities.dropItem(player.pos.x, player.pos.y + 0.5, player.pos.z, item, left);
+  renderHotbar(inventory);
+  return left;
 }
 
 function checkItemAdvancements(item) {
@@ -486,6 +663,19 @@ function requestPointerLock() {
   if (!state.started || state.paused || anyScreenOpen()) return;
   const el = renderer.domElement;
   if (document.pointerLockElement !== el && el.requestPointerLock) el.requestPointerLock();
+}
+
+// The Word Book goes back to wherever it was opened from: the pause menu, or
+// straight back into the game when opened with B.
+let wordbookFromPause = false;
+function showWordBook(fromPause) {
+  wordbookFromPause = fromPause;
+  setPaused(true);
+  openWordBook(quests);
+}
+function hideWordBook() {
+  closeWordBook();
+  if (!wordbookFromPause) setPaused(false);
 }
 
 function setPaused(on) {
@@ -542,6 +732,24 @@ function initInput() {
   });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  // Esc under pointer lock is swallowed by the browser: the mouse is freed but
+  // no keydown arrives. Losing the lock with no screen open therefore means
+  // "pause", exactly like the original.
+  document.addEventListener('pointerlockchange', () => {
+    if (locked()) return;
+    if (state.started && !state.paused && !anyScreenOpen()) {
+      state.lockLostAt = performance.now();
+      setPaused(true);
+    }
+  });
+
+  // Closing the tab or the laptop lid must not lose the last half-minute.
+  const saveNow = () => { if (state.started) saveGame(); };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveNow();
+  });
+  window.addEventListener('pagehide', saveNow);
+
   document.addEventListener('wheel', (e) => {
     if (!state.started || anyScreenOpen()) return;
     const dir = e.deltaY > 0 ? 1 : -1;
@@ -562,8 +770,15 @@ function handleKey(e) {
   const code = e.code;
   if (code === 'Escape') {
     if (!UI.el.inv.classList.contains('hidden')) { closeInventory(inventory); requestPointerLock(); }
+    else if (wordbookOpen()) hideWordBook();
     else if (questOpen()) closeQuest();
-    else if (state.started) setPaused(!state.paused);
+    else if (teacherOpen()) closeTeacher();
+    else if (state.started) {
+      // Some browsers deliver the Esc that released the pointer lock as well;
+      // it must not immediately un-pause what the lock loss just paused.
+      if (state.paused && performance.now() - (state.lockLostAt || 0) < 400) return;
+      setPaused(!state.paused);
+    }
     return;
   }
   if (!state.started) return;
@@ -590,11 +805,14 @@ function handleKey(e) {
     case 'KeyM': {
       const cb = document.getElementById('opt-music');
       cb.checked = !cb.checked;
-      setMusicEnabled(cb.checked);
+      cb.onchange();
       break;
     }
     case 'F3': e.preventDefault(); state.debug = !state.debug; setDebugVisible(state.debug); break;
     case 'F5': e.preventDefault(); state.thirdPerson = (state.thirdPerson + 1) % 3; break;
+    case 'KeyB':
+      if (!anyScreenOpen() && quests) showWordBook(false);
+      break;
     case 'KeyR': if (e.ctrlKey) return; break;
     default: break;
   }
@@ -710,17 +928,14 @@ function useHeld() {
   if (anyScreenOpen() || state.paused) return;
 
   // Talking to a villager comes first — it is the point of the game.
-  const villager = entities.nearestVillager(player.pos, 4.2);
-  if (villager && villager.quest) {
-    const eye = player.eye();
-    const toV = villager.pos.clone().sub(eye).normalize();
-    if (toV.dot(player.forward()) > 0.55) {
-      if (document.exitPointerLock) document.exitPointerLock();
-      Sfx.villager();
-      advancements.trigger('friend');
-      openQuest(villager, quests);
-      return;
-    }
+  const villager = talkableVillager();
+  if (villager) {
+    if (document.exitPointerLock) document.exitPointerLock();
+    Sfx.villager();
+    advancements.trigger('friend');
+    endTutorial();
+    openQuest(villager, quests);
+    return;
   }
 
   const hit = currentTarget();
@@ -740,7 +955,7 @@ function useHeld() {
       advancements.trigger('eat');
       renderHotbar(inventory);
       renderBars(player);
-      say('Yum! ' + def.label);
+      say(quests.line('eat', { word: def.label }));
     }
     return;
   }
@@ -756,6 +971,15 @@ function useHeld() {
     if (def.block === B.TORCH) advancements.trigger('torch');
     renderHotbar(inventory);
   }
+}
+
+// The villager a right-click would talk to: close, with an errand, and in front
+// of the player. The hint bar and useHeld() must agree on this.
+function talkableVillager() {
+  const v = entities.nearestVillager(player.pos, 4.2);
+  if (!v || !v.quest) return null;
+  const toV = v.pos.clone().sub(player.eye()).normalize();
+  return toV.dot(player.forward()) > 0.55 ? v : null;
 }
 
 function blockIntersectsPlayer(x, y, z) {
@@ -843,17 +1067,35 @@ function spawnParticles(x, y, z, bdef) {
     p.position.set(x + (rand() - 0.5) * 0.6, y + (rand() - 0.5) * 0.6, z + (rand() - 0.5) * 0.6);
     p.userData.vel.set((rand() - 0.5) * 3, rand() * 3.5, (rand() - 0.5) * 3);
     p.userData.life = 0.7;
+    p.userData.float = false;
     p.visible = true;
     scene.add(p);
     particles.push(p);
   }
 }
 
+// One yellow sparkle over the tutorial villager, from the same pool.
+function spawnSparkle(x, y, z) {
+  let p = particlePool.pop();
+  if (!p) {
+    p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshBasicMaterial());
+    p.userData.vel = new THREE.Vector3();
+  }
+  p.material.color.setHex(0xffd23f);
+  p.position.set(x, y, z);
+  p.userData.vel.set(0, 1.5 + rand(), 0);
+  p.userData.life = 0.6;
+  p.userData.float = true;
+  p.visible = true;
+  scene.add(p);
+  particles.push(p);
+}
+
 function updateParticles(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.userData.life -= dt;
-    p.userData.vel.y -= 22 * dt;
+    if (!p.userData.float) p.userData.vel.y -= 22 * dt;
     p.position.addScaledVector(p.userData.vel, dt);
     if (p.userData.life <= 0) {
       scene.remove(p);
@@ -875,6 +1117,7 @@ function updateHeldItem(dt) {
     const t = new THREE.TextureLoader().load(itemIcon(held));
     t.magFilter = THREE.NearestFilter;
     t.minFilter = THREE.NearestFilter;
+    if (heldSprite.material.map) heldSprite.material.map.dispose();
     heldSprite.material.map = t;
     heldSprite.material.needsUpdate = true;
   }
@@ -934,7 +1177,9 @@ function loop(t) {
 
   if (state.started && !state.paused) {
     readMovement();
-    player.update(dt, input);
+    // A pupil reading a villager's errand or crafting should not get hungry
+    // or fall while the dialog is up.
+    if (!anyScreenOpen()) player.update(dt, input);
     world.update(player.pos.x, player.pos.z, 5);
     entities.update(dt, player);
     quests.update(dt);
@@ -942,10 +1187,12 @@ function loop(t) {
     tickFurnaces(dt);
     updateMining(dt);
     updateParticles(dt);
+    updateTutorial(dt);
     updateFootsteps(dt);
     updateWater();
     updateHeldItem(dt);
     renderBars(player);
+    renderEmeralds(quests.emeralds);
     updateHints();
     if (sky.daylight < 0.35) advancements.trigger('night');
     state.time += dt;
@@ -961,23 +1208,32 @@ function loop(t) {
   if (state.debug) drawDebug();
 }
 
+
 // A single line of guidance, driven by what is actually in front of the player.
+let lastSignKey = null;
 function updateHints() {
   if (anyScreenOpen()) { hint(null); return; }
-  const v = entities.nearestVillager(player.pos, 4.2);
-  if (v && v.quest) {
-    hint('Right-click to talk to <b>' + (v.name || 'the villager') + '</b>');
+  const v = talkableVillager();
+  if (v) {
+    hint('Right-click to talk to <b>' + escapeHtml(v.name || 'the villager') + '</b>');
+    lastSignKey = null;
     return;
   }
   const hit = currentTarget();
+  const key = hit ? hit.x + ',' + hit.y + ',' + hit.z : null;
+  if (hit && BLOCKS[hit.id].interact === 'sign') {
+    const text = signs.get(key);
+    if (text) {
+      hint('“<b>' + escapeHtml(text) + '</b>”');
+      // Read it once when you look at it, not every frame you keep looking.
+      if (lastSignKey !== key) say(text);
+    } else hint('Right-click the <b>sign</b> to write a word');
+    lastSignKey = key;
+    return;
+  }
+  lastSignKey = null;
   if (hit) {
     const bd = BLOCKS[hit.id];
-    if (bd.interact === 'sign') {
-      const text = signs.get(hit.x + ',' + hit.y + ',' + hit.z);
-      if (text) { hint('“<b>' + text + '</b>”'); say(text); }
-      else hint('Right-click the <b>sign</b> to write a word');
-      return;
-    }
     if (bd.interact === 'crafting_table') { hint('Right-click the <b>Crafting Table</b>'); return; }
     if (bd.interact === 'furnace') { hint('Right-click the <b>Furnace</b>'); return; }
     if (bd.interact === 'chest') { hint('Right-click the <b>Chest</b>'); return; }
@@ -1010,6 +1266,7 @@ function buildSavePayload() {
     seed: state.seed,
     packId: state.packId,
     year: state.year,
+    classCode: state.classCode || getClassCode(),
     pos: [player.pos.x, player.pos.y, player.pos.z],
     yaw: player.yaw, pitch: player.pitch,
     health: player.health, hunger: player.hunger,
@@ -1018,8 +1275,17 @@ function buildSavePayload() {
     deltas: world.serializeDeltas(),
     advancements: advancements.serialize(),
     learned: [...quests.learned],
+    questsCompleted: quests.completed,
+    emeralds: quests.emeralds,
     signs: [...signs],
     chests: [...chests].map(([k, c]) => [k, c.slots.map((x) => (x ? [x.item, x.count] : 0))]),
+    furnaces: [...furnaces].map(([k, f]) => [k, {
+      input: f.input ? [f.input.item, f.input.count] : 0,
+      fuel: f.fuel ? [f.fuel.item, f.fuel.count] : 0,
+      output: f.output ? [f.output.item, f.output.count] : 0,
+      burn: f.burn, burnMax: f.burnMax, cook: f.cook,
+    }]),
+    savedAt: Date.now(),
   };
 }
 
@@ -1031,7 +1297,7 @@ async function saveGame() {
   try {
     const data = buildSavePayload();
     saveLocalSave(name, data);
-    if (isCloudEnabled()) return await saveCloudSave(name, data);
+    if (isCloudEnabled()) return await saveCloudSave(name, data, { classCode: data.classCode });
     return true;
   } catch (e) {
     console.warn('Could not save:', e);
@@ -1054,17 +1320,16 @@ async function loadSaveData(name) {
 }
 
 // ==================================================================== boot
-function boot() {
+async function boot() {
   initRenderer();
   initSpeech();
   initAudio();
-  initSaves();
   initInput();
   buildYearPicker();
   buildPackPicker();
   validateWords();
-  wireMenus();
   initUI({});
+  wireMenus();
   showHud(false);
 
   // Debug/verification handle. Everything the tests need is reachable here.
@@ -1144,6 +1409,10 @@ function boot() {
       return { gen: +gen.toFixed(1), light: +light.toFixed(1), mesh: +mesh.toFixed(1) };
     },
   };
+
+  // Cloud saves load in the background: a school network that blocks the
+  // Firebase CDN must not leave the title screen dead. Local saves work at once.
+  initSaves().then((ok) => { if (ok) updateContinueButton(); });
 }
 
 boot();
