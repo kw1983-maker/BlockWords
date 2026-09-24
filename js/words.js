@@ -71,9 +71,10 @@
 //   {name}      the villager's name
 //
 // Besides fetch / fetchU / find / place / visit, a year's `lines` may also
-// override the shared feedback lines in COMMON_LINES: found, visited, goBack
-// and eat. `hints` is the one-line reminder shown in the villager's dialog, and
-// `praise` is what the villager says when the job is done.
+// override the shared feedback lines in COMMON_LINES: found, visited, goBack,
+// eat, and the farming / sleeping lines till, plant, harvest, milk, sleep,
+// wake, cantSleep and bedSet. `hints` is the one-line reminder shown in the
+// villager's dialog, and `praise` is what the villager says when the job is done.
 //
 // A template that already contains {sentence} is not followed by the model
 // sentence a second time.
@@ -100,6 +101,15 @@ export const COMMON_LINES = {
   visited: ['You found the {word}!'],     // a "visit" errand is done
   goBack: ['Go back to {name}.'],         // …and where to go next
   eat: ['Yum! {word}.'],                  // eating something
+  // farming and sleeping
+  till: ['You dig the ground.'],          // a hoe turns grass into farmland
+  plant: ['You plant the {word}.'],       // seeds go into farmland
+  harvest: ['You pick the {word}!'],      // a ripe crop is picked
+  milk: ['Milk from the cow!'],           // a bucket on a cow
+  sleep: ['Good night!'],                 // lying down in a bed at night
+  wake: ['Good morning! It is day {n}.'], // …and waking up; {n} is the day
+  cantSleep: ['You can only sleep at night.'],
+  bedSet: ['This is your bed now.'],      // first time using a bed
 };
 
 export const YEARS = [
@@ -175,6 +185,9 @@ export const YEARS = [
         "Where's the {word}? Go and find it!",
         'Can you visit the {word}? Come back when you are there.',
       ],
+      plant: ['You plant the {word}. Now they can grow.'],
+      harvest: ['Look! It grew. You pick the {word}!'],
+      wake: ['Good morning! Today is day {n}.'],
     },
     hints: {
       fetch: 'Find {n} {what} and bring {it} back to me.',
@@ -263,6 +276,11 @@ export const YEARS = [
         'We are learning about the {word}. Please go there and come back.',
         'Can you find the {word}? Visit it, then tell me.',
       ],
+      till: ['First you dig the ground. Then you plant the seeds.'],
+      plant: ['You planted the {word}. Water helps them grow faster.'],
+      harvest: ['You planted them, and now you can pick the {word}!'],
+      sleep: ['Good night! It was a long day.'],
+      wake: ["Good morning! Did you sleep well? It's day {n}."],
     },
     hints: {
       fetch: 'Collect {n} {what}, then bring {it} back to me.',

@@ -91,6 +91,19 @@ export async function hasCloudSave(name) {
   }
 }
 
+// Firestore rejects arrays inside arrays, and the save is full of them
+// (inventory slots, chests, deltas, crops). So the payload travels as one JSON
+// string inside a map — the rules still see `data is map`. Older documents
+// stored the payload directly; unpackSave reads both.
+function packSave(data) { return { json: JSON.stringify(data) }; }
+function unpackSave(stored) {
+  if (!stored) return null;
+  if (typeof stored.json === 'string') {
+    try { return JSON.parse(stored.json); } catch (e) { return null; }
+  }
+  return stored;
+}
+
 export async function loadCloudSave(name) {
   if (!isCloudEnabled()) return null;
   const id = normalizeName(name);
@@ -99,7 +112,7 @@ export async function loadCloudSave(name) {
     const snap = await db.collection(SAVES_COLLECTION).doc(id).get();
     if (!snap.exists) return null;
     const doc = snap.data();
-    return doc && doc.data ? doc.data : null;
+    return doc ? unpackSave(doc.data) : null;
   } catch (e) {
     console.warn('Cloud load failed:', e);
     return null;
@@ -118,7 +131,7 @@ export async function saveCloudSave(name, data, meta = {}) {
       schemaVersion: SCHEMA_VERSION,
       uid: authUid,
       classCode: meta.classCode || '',
-      data,
+      data: packSave(data),
     });
     return true;
   } catch (e) {
@@ -158,7 +171,7 @@ export async function listCloudSaves() {
         displayName: d.displayName || doc.id,
         updatedAt: d.updatedAt || null,
         classCode: d.classCode || '',
-        data: d.data || {},
+        data: unpackSave(d.data) || {},
       };
     });
   } catch (e) {

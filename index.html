@@ -831,8 +831,10 @@ function def(name, o = {}) {
     needs: o.needs || TIER.HAND,
     light: o.light || 0,
     drops: o.drops !== undefined ? o.drops : name, // item name, null, or special
-    interact: o.interact || null,     // crafting_table | furnace | chest | sign
+    interact: o.interact || null,     // crafting_table | furnace | chest | sign | bed
     liquid: o.render === 'liquid',
+    height: o.height || 1,            // < 1 for low cubes (farmland, bed)
+    crop: o.crop || null,             // { name, stage } for growing plants
   };
   BLOCKS.push(b);
   B[name.toUpperCase()] = id;
@@ -864,6 +866,10 @@ def('gravel', { hardness: 0.6, tool: 'shovel' });
 def('snow_block', { label: 'Snow', hardness: 0.2, tool: 'shovel', tiles: 'snow' });
 def('ice', { hardness: 0.5, tool: 'pickaxe', opaque: false, drops: null });
 def('clay', { hardness: 0.6, tool: 'shovel' });
+def('farmland', {
+  hardness: 0.6, tool: 'shovel', drops: 'dirt', opaque: false, height: 15 / 16,
+  tiles: { top: 'farmland_top', bottom: 'dirt', side: 'dirt' },
+});
 
 // ---- ores ---------------------------------------------------------------
 def('coal_ore', { hardness: 3, tool: 'pickaxe', needs: TIER.WOOD, drops: 'coal' });
@@ -889,6 +895,22 @@ def('rose', { label: 'Red Flower', render: 'cross', solid: false, hardness: 0.05
 def('dandelion', { label: 'Yellow Flower', render: 'cross', solid: false, hardness: 0.05 });
 def('sugar_cane', { render: 'cross', solid: false, hardness: 0.1 });
 def('cactus', { hardness: 0.4, opaque: false, tiles: { top: 'cactus_top', bottom: 'cactus_top', side: 'cactus' } });
+// ---- crops: one block per growth stage (a voxel is one byte, no metadata) --
+const CROPS = {
+  wheat: { seed: 'wheat_seeds', produce: 'wheat', word: 'wheat' },
+  carrots: { seed: 'carrot', produce: 'carrot', word: 'carrots' },
+  potatoes: { seed: 'potato', produce: 'potato', word: 'potatoes' },
+};
+const CROP_RIPE = 3;
+for (const crop of Object.keys(CROPS)) {
+  for (let stage = 0; stage <= CROP_RIPE; stage++) {
+    def(crop + '_' + stage, {
+      label: crop.charAt(0).toUpperCase() + crop.slice(1),
+      render: 'cross', solid: false, hardness: 0, drops: 'crop',
+      crop: { name: crop, stage },
+    });
+  }
+}
 def('pumpkin', { hardness: 1, tool: 'axe', tiles: { top: 'pumpkin_top', bottom: 'pumpkin_top', side: 'pumpkin' } });
 
 // ---- crafted / utility --------------------------------------------------
@@ -909,6 +931,10 @@ def('chest', {
   tiles: { top: 'chest_top', bottom: 'chest_top', side: 'chest_side' },
 });
 def('sign', { render: 'cross', solid: false, hardness: 1, tool: 'axe', interact: 'sign', tiles: 'sign' });
+def('bed', {
+  hardness: 0.4, tool: 'axe', interact: 'bed', opaque: false, height: 9 / 16,
+  tiles: { top: 'bed_top', bottom: 'oak_planks', side: 'bed_side' },
+});
 def('bookshelf', { hardness: 1.5, tool: 'axe', tiles: { top: 'oak_planks', bottom: 'oak_planks', side: 'bookshelf' } });
 
 // ---- wool: the colour vocabulary, one block per colour -------------------
@@ -1178,6 +1204,54 @@ tile('pumpkin', (p) => {
   for (let x = 2; x < TILE; x += 4) p.rect(x, 0, 1, TILE, [176, 96, 14], 6);
 });
 tile('pumpkin_top', (p) => { p.fill([196, 112, 20], 12); p.rect(6, 6, 4, 4, [124, 96, 40]); });
+
+// Tilled soil: dark, damp rows of earth.
+tile('farmland_top', (p) => {
+  p.fill([96, 64, 40], 10);
+  for (let y = 1; y < TILE; y += 4) p.rect(0, y, TILE, 2, [72, 46, 28], 6);
+});
+
+// Crops get taller and fuller with each stage; the last stage shows the food.
+const CROP_STEM = [[96, 170, 60], [84, 160, 52], [78, 150, 46], [70, 140, 40]];
+function cropTile(name, stage, draw) {
+  tile(name + '_' + stage, (p) => {
+    p.clear();
+    const h = 4 + stage * 3;                       // 4, 7, 10, 13 pixels tall
+    const col = CROP_STEM[stage];
+    for (let x = 1; x < TILE; x += 3) {
+      const hh = h - ((x * 7) % 3);
+      p.rect(x, TILE - hh, 1, hh, col, 8);
+    }
+    if (draw) draw(p, h);
+  });
+}
+for (let s = 0; s <= 3; s++) {
+  cropTile('wheat', s, s === 3 ? (p, h) => {
+    for (let x = 1; x < TILE; x += 3) p.rect(x - 1, TILE - h, 3, 4, [214, 186, 84], 14); // grain heads
+  } : null);
+  cropTile('carrots', s, s === 3 ? (p) => {
+    for (let x = 2; x < TILE; x += 5) p.rect(x, TILE - 2, 3, 2, [236, 128, 36], 10);   // orange tops
+  } : null);
+  cropTile('potatoes', s, s === 3 ? (p) => {
+    for (let x = 1; x < TILE; x += 5) p.rect(x, TILE - 2, 4, 2, [200, 164, 96], 10);   // potatoes peeping out
+  } : null);
+}
+
+// A one-block bed: red blanket, white pillow at one end.
+tile('bed_top', (p) => {
+  p.fill([180, 40, 40], 10);
+  p.rect(0, 0, TILE, 5, [238, 238, 232], 6);
+  p.rect(0, 5, TILE, 1, [140, 30, 30]);
+});
+// Low blocks squash their side tile into the block's height, so this is drawn
+// full-size: blanket on top, wooden frame below.
+tile('bed_side', (p) => {
+  p.rect(0, 0, TILE, 9, [180, 40, 40], 10);
+  p.rect(0, 0, TILE, 1, [206, 64, 64]);
+  p.rect(0, 9, TILE, 7, OAK, 8);
+  p.rect(0, 9, 2, 7, [126, 100, 58]);
+  p.rect(14, 9, 2, 7, [126, 100, 58]);
+});
 
 tile('glass', (p) => {
   p.clear();
@@ -1609,6 +1683,40 @@ function buildHouse(seed, house, put) {
   put(doorX, y, z0 - 1, B.AIR);
   put(x0 + 1, y + wallTop - 1, z0 + 1, B.GLOWSTONE);
   put(x0 + w - 2, y + 1, z0 + d - 2, B.CRAFTING_TABLE);
+  put(x0 + 1, y + 1, z0 + d - 2, B.BED);
+}
+
+// A 7x5 field beside the well: a water channel down the middle and ripe
+// wheat, carrots and potatoes, so the first harvest (and the first seeds) are
+// right next to where the player starts. Deterministic, like the houses.
+const FARM_W = 7, FARM_D = 5;
+const FARM_ROWS = ['WHEAT_3', 'CARROTS_3', null, 'POTATOES_3', 'WHEAT_3'];
+function villageFarm(seed, village) {
+  const houses = villageHouses(seed, village);
+  const offsets = [[6, -2], [-12, -2], [-3, 6], [-3, -10]];
+  for (const [ox, oz] of offsets) {
+    const x0 = village.x + ox, z0 = village.z + oz;
+    const clash = houses.some((h) => {
+      const hx0 = h.x - (h.w >> 1) - 2, hz0 = h.z - (h.d >> 1) - 2;
+      return x0 < hx0 + h.w + 4 && x0 + FARM_W > hx0 && z0 < hz0 + h.d + 4 && z0 + FARM_D > hz0;
+    });
+    if (!clash) return { x0, z0 };
+  }
+  return null;
+}
+
+function buildFarm(seed, farm, put) {
+  for (let dx = 0; dx < FARM_W; dx++) {
+    for (let dz = 0; dz < FARM_D; dz++) {
+      const x = farm.x0 + dx, z = farm.z0 + dz;
+      const y = heightAt(seed, x, z);
+      if (y <= SEA_LEVEL) continue;
+      const row = FARM_ROWS[dz];
+      put(x, y, z, row ? B.FARMLAND : B.WATER, true);
+      put(x, y + 1, z, row ? B[row] : B.AIR, true);
+      put(x, y + 2, z, B.AIR, true);
+    }
+  }
 }
 
 // Is (wx, wz) inside a village footprint? Cheap enough to call per column and
@@ -1616,6 +1724,8 @@ function buildHouse(seed, house, put) {
 function inVillage(seed, wx, wz) {
   for (const v of villagesNear(seed, wx, wz, 64)) {
     if (Math.abs(v.x - wx) <= 3 && Math.abs(v.z - wz) <= 3) return true;
+    const f = villageFarm(seed, v);
+    if (f && wx >= f.x0 - 2 && wx < f.x0 + FARM_W + 2 && wz >= f.z0 - 2 && wz < f.z0 + FARM_D + 2) return true;
     for (const h of villageHouses(seed, v)) {
       if (Math.abs(h.x - wx) <= (h.w >> 1) + 2 && Math.abs(h.z - wz) <= (h.d >> 1) + 2) return true;
     }
@@ -1645,6 +1755,9 @@ function decorateVillages(seed, cx, cz, put) {
         put(px, heightAt(seed, px, pz), pz, B.DIRT_PATH);
       }
     }
+    // After the paths, so a path never fills in the farm's water channel.
+    const farm = villageFarm(seed, v);
+    if (farm) buildFarm(seed, farm, put);
   }
 }
 
@@ -1684,14 +1797,15 @@ function decoratePlants(seed, cx, cz, put) {
 function generateChunk(seed, cx, cz, data) {
   generateTerrain(seed, cx, cz, data);
   const baseX = cx * CHUNK_X, baseZ = cz * CHUNK_Z;
-  const put = (wx, wy, wz, id) => {
+  // `force` lets a feature replace terrain (a farm tilling the grass).
+  const put = (wx, wy, wz, id, force) => {
     const lx = wx - baseX, lz = wz - baseZ;
     if (lx < 0 || lz < 0 || lx >= CHUNK_X || lz >= CHUNK_Z || wy < 0 || wy >= CHUNK_Y) return;
     const k = idx(lx, wy, lz);
     // Features never carve through terrain except where they mean to
     // (house interiors pass B.AIR explicitly).
     const cur = data[k];
-    if (id === B.AIR || cur === B.AIR || cur === B.WATER || cur === B.TALL_GRASS) data[k] = id;
+    if (force || id === B.AIR || cur === B.AIR || cur === B.WATER || cur === B.TALL_GRASS) data[k] = id;
   };
   decorateVillages(seed, cx, cz, put);
   for (let dx = -1; dx <= 1; dx++) {
@@ -1910,6 +2024,7 @@ const AO_LEVELS = [0.42, 0.62, 0.81, 1.0];
 let OPAQUE = null;   // 1 = hides the face behind it
 let RENDERT = null;  // 0 = cube, 1 = cross, 2 = liquid
 let UVTAB = null;    // [blockId][face] -> u0, v0, u1, v1
+let TOPOFF = null;   // how far a cube's top sits below 1 (farmland, bed)
 
 // Built after the atlas exists, which is why this is lazy rather than top level.
 function ensureTables() {
@@ -1918,9 +2033,12 @@ function ensureTables() {
   OPAQUE = new Uint8Array(n);
   RENDERT = new Uint8Array(n);
   UVTAB = new Float32Array(n * 6 * 4);
+  TOPOFF = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const b = BLOCKS[i];
     OPAQUE[i] = b.opaque ? 1 : 0;
+    // water sits just below a full block, like the original
+    TOPOFF[i] = b.render === 'liquid' ? -0.12 : b.height - 1;
     RENDERT[i] = b.render === 'cross' ? 1 : b.render === 'liquid' ? 2 : 0;
     if (b.name === 'air') continue;
     for (let d = 0; d < 6; d++) {
@@ -2079,11 +2197,12 @@ function buildGeometry(chunk, world) {
 
           grow(buf, 4, 6);
           const base = buf.nVert;
+          // Low cubes drop every top corner; water only lowers its surface.
+          const topOff = (rt === 0 || d === 2) ? TOPOFF[id] : 0;
           for (let c = 0; c < 4; c++) {
             const corner = f.corners[c];
             const vx = corner[0], vy = corner[1], vz = corner[2];
-            // water sits just below a full block, like the original
-            const yOff = (rt === 2 && d === 2 && vy === 1) ? -0.12 : 0;
+            const yOff = vy === 1 ? topOff : 0;
             buf.pos[buf.nPos++] = x + vx;
             buf.pos[buf.nPos++] = y + vy + yOff;
             buf.pos[buf.nPos++] = z + vz;
@@ -2542,6 +2661,7 @@ function item(name, o = {}) {
     tool: null,   // { type: 'pickaxe'|'axe'|'shovel'|'sword', tier }
     food: null,   // { hunger, heal }
     fuel: 0,      // smelting ticks this item is worth
+    plants: null, // crop block this item plants on farmland ('wheat_0')
   }, o);
   return ITEMS[name];
 }
@@ -2549,6 +2669,7 @@ function item(name, o = {}) {
 // --- every placeable block is an item -----------------------------------
 for (const b of BLOCKS) {
   if (b.name === 'air' || b.name === 'water' || b.name === 'bedrock') continue;
+  if (b.crop || b.name === 'farmland') continue; // only made in the world
   item(b.name, { label: b.label, block: b.id });
 }
 ITEMS.oak_log.fuel = 300;
@@ -2572,6 +2693,9 @@ item('leather', { label: 'Leather' });
 item('wheat', { label: 'Wheat' });
 item('clay_ball', { label: 'Clay Ball' });
 item('egg', { label: 'Egg', stack: 16 });
+item('wheat_seeds', { label: 'Seeds', plants: 'wheat_0' });
+item('bucket', { label: 'Bucket', stack: 16 });
+item('water_bucket', { label: 'Water Bucket', stack: 1 });
 
 // --- food ---------------------------------------------------------------
 item('apple', { label: 'Apple', stack: 64, food: { hunger: 4, heal: 0 } });
@@ -2584,6 +2708,10 @@ item('raw_mutton', { label: 'Raw Mutton', food: { hunger: 3, heal: 0 } });
 item('cooked_mutton', { label: 'Cooked Mutton', food: { hunger: 7, heal: 2 } });
 item('raw_chicken', { label: 'Raw Chicken', food: { hunger: 2, heal: 0 } });
 item('cooked_chicken', { label: 'Cooked Chicken', food: { hunger: 6, heal: 2 } });
+item('carrot', { label: 'Carrot', food: { hunger: 3, heal: 1 }, plants: 'carrots_0' });
+item('potato', { label: 'Potato', food: { hunger: 1, heal: 0 }, plants: 'potatoes_0' });
+item('baked_potato', { label: 'Baked Potato', food: { hunger: 5, heal: 1 } });
+item('milk_bucket', { label: 'Milk', stack: 1, food: { hunger: 2, heal: 2 }, leaves: 'bucket' });
 
 // --- tools --------------------------------------------------------------
 const TOOL_TIERS = [
@@ -2591,7 +2719,7 @@ const TOOL_TIERS = [
   ['iron', TIER.IRON], ['diamond', TIER.DIAMOND],
 ];
 for (const [mat, tier] of TOOL_TIERS) {
-  for (const type of ['pickaxe', 'axe', 'shovel', 'sword']) {
+  for (const type of ['pickaxe', 'axe', 'shovel', 'hoe', 'sword']) {
     item(mat + '_' + type, {
       label: mat.charAt(0).toUpperCase() + mat.slice(1) + ' ' + type.charAt(0).toUpperCase() + type.slice(1),
       stack: 1,
@@ -2680,6 +2808,8 @@ function toolIcon(mat, type) {
       px(9, 5, dark, 3, 1); px(13, 3, dark, 1, 2);
     } else if (type === 'shovel') {
       px(10, 2, light, 4, 1); px(10, 3, light, 4, 2); px(11, 5, dark, 2, 1);
+    } else if (type === 'hoe') {
+      px(8, 3, light, 5, 1); px(8, 4, dark, 2, 1); px(12, 4, dark, 1, 2);
     } else {
       for (let i = 0; i < 8; i++) px(6 + i, 9 - i, light, 1, 1); // blade
       for (let i = 0; i < 7; i++) px(7 + i, 9 - i, dark, 1, 1);
@@ -2704,6 +2834,13 @@ const PIXEL_ICONS = {
   egg: (px) => { px(6, 4, '#f6efe0', 4, 1); px(5, 5, '#f6efe0', 6, 5); px(6, 10, '#e2d8c4', 4, 1); px(6, 6, '#fffdf6', 2, 2); },
   apple: (px) => { px(5, 5, '#d8342f', 6, 6); px(4, 6, '#d8342f', 8, 4); px(6, 4, '#7a4b22', 1, 2); px(7, 3, '#4f9e3a', 3, 1); px(6, 6, '#f06a5f', 2, 2); },
   bread: (px) => { px(3, 6, '#c58a3d', 10, 5); px(4, 5, '#d8a055', 8, 1); px(5, 7, '#a86e2a', 1, 2); px(8, 7, '#a86e2a', 1, 2); },
+  wheat_seeds: (px) => { for (const [x, y] of [[5, 6], [8, 5], [10, 8], [6, 9], [9, 11], [4, 11]]) { px(x, y, '#6aa84f', 2, 1); px(x, y + 1, '#3f7a2a', 1, 1); } },
+  carrot: (px) => { for (let i = 0; i < 6; i++) px(5 + i, 11 - i, '#ec8024', 2, 2); px(4, 12, '#c8621a', 1, 1); px(11, 3, '#4f9e3a', 2, 2); px(12, 2, '#3f8a2e', 2, 1); },
+  potato: (px) => { px(5, 6, '#c9a15c', 6, 5); px(4, 7, '#c9a15c', 8, 3); px(6, 7, '#a88040', 1, 1); px(9, 9, '#a88040', 1, 1); },
+  baked_potato: (px) => { px(5, 6, '#b8742e', 6, 5); px(4, 7, '#b8742e', 8, 3); px(6, 7, '#f0d890', 4, 2); },
+  bucket: (px) => { px(4, 5, '#c8c8c8', 8, 1); px(4, 6, '#a0a0a0', 1, 6); px(11, 6, '#a0a0a0', 1, 6); px(5, 11, '#a0a0a0', 6, 1); px(5, 6, '#3a3a3a', 6, 5); },
+  water_bucket: (px) => { px(4, 5, '#c8c8c8', 8, 1); px(4, 6, '#a0a0a0', 1, 6); px(11, 6, '#a0a0a0', 1, 6); px(5, 11, '#a0a0a0', 6, 1); px(5, 6, '#3a6fd8', 6, 5); px(6, 6, '#6a9af0', 2, 1); },
+  milk_bucket: (px) => { px(4, 5, '#c8c8c8', 8, 1); px(4, 6, '#a0a0a0', 1, 6); px(11, 6, '#a0a0a0', 1, 6); px(5, 11, '#a0a0a0', 6, 1); px(5, 6, '#f6f6f2', 6, 5); },
 };
 function meatIcon(raw, colA, colB) {
   return (px) => {
@@ -2742,14 +2879,27 @@ function itemIcon(name) {
   return url;
 }
 
-// What a block gives you when it breaks. `apple_chance` is the oak-leaf rule:
-// most leaves give nothing, now and then one drops an apple.
+// What a block gives you when it breaks, as a list of [item, count] — empty
+// for nothing. `apple_chance` is the oak-leaf rule: most leaves give nothing,
+// now and then one drops an apple. A crop gives back its seed until it is ripe,
+// and a real harvest once it is.
 function dropsOf(blockId, rand) {
-  const d = BLOCKS[blockId].drops;
-  if (!d) return null;
-  if (d === 'apple_chance') return rand() < 0.06 ? 'apple' : null;
-  if (d === 'wheat_chance') return rand() < 0.3 ? 'wheat' : null;
-  return ITEMS[d] ? d : null;
+  const b = BLOCKS[blockId];
+  const d = b.drops;
+  if (!d) return [];
+  if (d === 'apple_chance') return rand() < 0.06 ? [['apple', 1]] : [];
+  if (d === 'wheat_chance') {
+    const r = rand();
+    return r < 0.25 ? [['wheat_seeds', 1]] : r < 0.35 ? [['wheat', 1]] : [];
+  }
+  if (d === 'crop') {
+    const c = CROPS[b.crop.name];
+    if (b.crop.stage < CROP_RIPE) return [[c.seed, 1]];
+    if (c.produce === c.seed) return [[c.produce, 2 + Math.floor(rand() * 3)]];
+    const seeds = Math.floor(rand() * 3);
+    return seeds ? [[c.produce, 1], [c.seed, seeds]] : [[c.produce, 1]];
+  }
+  return ITEMS[d] ? [[d, 1]] : [];
 }
 
 // ===== js/crafting.js =====
@@ -2759,6 +2909,7 @@ function dropsOf(blockId, rand) {
 
 const PLANKS = ['oak_planks', 'birch_planks'];
 const LOGS = ['oak_log', 'birch_log', 'spruce_log'];
+const WOOLS = WOOL_COLOURS.map((c) => c[0] + '_wool');
 
 const RECIPES = [];
 
@@ -2776,6 +2927,8 @@ shaped('sign', 3, ['###', '###', ' S '], { '#': PLANKS, S: ['stick'] });
 shaped('bookshelf', 1, ['###', 'WWW', '###'], { '#': PLANKS, W: ['wheat'] });
 shaped('bread', 1, ['WWW'], { W: ['wheat'] });
 shaped('bricks', 1, ['##', '##'], { '#': ['clay_ball'] });
+shaped('bed', 1, ['WWW', 'PPP'], { W: WOOLS, P: PLANKS });
+shaped('bucket', 1, ['I I', ' I '], { I: ['iron_ingot'] });
 
 // --- tools: the ladder every Minecraft game climbs
 const TOOL_MATS = {
@@ -2790,6 +2943,7 @@ for (const mat of Object.keys(TOOL_MATS)) {
   shaped(mat + '_pickaxe', 1, ['MMM', ' S ', ' S '], { M, S });
   shaped(mat + '_axe', 1, ['MM', 'MS', ' S'], { M, S });
   shaped(mat + '_shovel', 1, ['M', 'S', 'S'], { M, S });
+  shaped(mat + '_hoe', 1, ['MM', ' S', ' S'], { M, S });
   shaped(mat + '_sword', 1, ['M', 'M', 'S'], { M, S });
 }
 
@@ -2873,6 +3027,7 @@ const SMELTING = {
   raw_beef: 'cooked_beef',
   raw_mutton: 'cooked_mutton',
   raw_chicken: 'cooked_chicken',
+  potato: 'baked_potato',
 };
 delete SMELTING.clay; // no brick item — clay stays a building block
 
@@ -2884,6 +3039,71 @@ function smeltResult(name) {
 function fuelValue(name) {
   const d = ITEMS[name];
   return d ? d.fuel : 0;
+}
+
+// ===== js/farming.js =====
+// Crops the player has planted, and how far each one has grown. Growth is a
+// pure function of how long ago the seed went in, so a field in a chunk that
+// was unloaded catches up the moment the player walks back to it.
+
+
+// Seconds per growth stage. Three stages to ripe keeps a harvest inside one
+// lesson; water within four blocks speeds it up, as in the original.
+const GROW_STAGE_SECONDS = 40;
+const WET_SPEEDUP = 1.5;
+const WATER_REACH = 4;
+
+class Farm {
+  constructor(world) {
+    this.world = world;
+    this.crops = new Map(); // 'x,y,z' -> game time (sky.time) it was planted
+    this.tick = 0;
+  }
+
+  plant(x, y, z, time) { this.crops.set(x + ',' + y + ',' + z, time); }
+  forget(x, y, z) { this.crops.delete(x + ',' + y + ',' + z); }
+
+  update(dt, time) {
+    this.tick += dt;
+    if (this.tick < 1) return;
+    this.tick = 0;
+    for (const [k, planted] of this.crops) {
+      const [x, y, z] = k.split(',').map(Number);
+      if (!this.world.isLoaded(x, z)) continue;
+      const id = this.world.getBlock(x, y, z);
+      const crop = BLOCKS[id].crop;
+      if (!crop) { this.crops.delete(k); continue; } // broken or trampled away
+      const rate = this.wet(x, y, z) ? WET_SPEEDUP : 1;
+      const stage = Math.min(CROP_RIPE, Math.floor(((time - planted) * rate) / GROW_STAGE_SECONDS));
+      if (stage > crop.stage) this.world.setBlock(x, y, z, B[(crop.name + '_' + stage).toUpperCase()]);
+      if (stage >= CROP_RIPE) this.crops.delete(k);
+    }
+  }
+
+  // Water on the farmland's own level, within reach.
+  wet(x, y, z) {
+    for (let dx = -WATER_REACH; dx <= WATER_REACH; dx++) {
+      for (let dz = -WATER_REACH; dz <= WATER_REACH; dz++) {
+        if (this.world.getBlock(x + dx, y - 1, z + dz) === B.WATER) return true;
+      }
+    }
+    return false;
+  }
+
+  // Debug: ripen everything now.
+  ripenAll() {
+    for (const k of this.crops.keys()) {
+      const [x, y, z] = k.split(',').map(Number);
+      const crop = BLOCKS[this.world.getBlock(x, y, z)].crop;
+      if (crop) this.world.setBlock(x, y, z, B[(crop.name + '_' + CROP_RIPE).toUpperCase()]);
+    }
+    const n = this.crops.size;
+    this.crops.clear();
+    return n;
+  }
+
+  serialize() { return [...this.crops]; }
+  load(arr) { if (Array.isArray(arr)) this.crops = new Map(arr); }
 }
 
 // ===== js/inventory.js =====
@@ -4549,9 +4769,10 @@ function setSpeechEnabled(on) {
 //   {name}      the villager's name
 //
 // Besides fetch / fetchU / find / place / visit, a year's `lines` may also
-// override the shared feedback lines in COMMON_LINES: found, visited, goBack
-// and eat. `hints` is the one-line reminder shown in the villager's dialog, and
-// `praise` is what the villager says when the job is done.
+// override the shared feedback lines in COMMON_LINES: found, visited, goBack,
+// eat, and the farming / sleeping lines till, plant, harvest, milk, sleep,
+// wake, cantSleep and bedSet. `hints` is the one-line reminder shown in the
+// villager's dialog, and `praise` is what the villager says when the job is done.
 //
 // A template that already contains {sentence} is not followed by the model
 // sentence a second time.
@@ -4578,6 +4799,15 @@ const COMMON_LINES = {
   visited: ['You found the {word}!'],     // a "visit" errand is done
   goBack: ['Go back to {name}.'],         // …and where to go next
   eat: ['Yum! {word}.'],                  // eating something
+  // farming and sleeping
+  till: ['You dig the ground.'],          // a hoe turns grass into farmland
+  plant: ['You plant the {word}.'],       // seeds go into farmland
+  harvest: ['You pick the {word}!'],      // a ripe crop is picked
+  milk: ['Milk from the cow!'],           // a bucket on a cow
+  sleep: ['Good night!'],                 // lying down in a bed at night
+  wake: ['Good morning! It is day {n}.'], // …and waking up; {n} is the day
+  cantSleep: ['You can only sleep at night.'],
+  bedSet: ['This is your bed now.'],      // first time using a bed
 };
 
 const YEARS = [
@@ -4653,6 +4883,9 @@ const YEARS = [
         "Where's the {word}? Go and find it!",
         'Can you visit the {word}? Come back when you are there.',
       ],
+      plant: ['You plant the {word}. Now they can grow.'],
+      harvest: ['Look! It grew. You pick the {word}!'],
+      wake: ['Good morning! Today is day {n}.'],
     },
     hints: {
       fetch: 'Find {n} {what} and bring {it} back to me.',
@@ -4741,6 +4974,11 @@ const YEARS = [
         'We are learning about the {word}. Please go there and come back.',
         'Can you find the {word}? Visit it, then tell me.',
       ],
+      till: ['First you dig the ground. Then you plant the seeds.'],
+      plant: ['You planted the {word}. Water helps them grow faster.'],
+      harvest: ['You planted them, and now you can pick the {word}!'],
+      sleep: ['Good night! It was a long day.'],
+      wake: ["Good morning! Did you sleep well? It's day {n}."],
     },
     hints: {
       fetch: 'Collect {n} {what}, then bring {it} back to me.',
@@ -5672,6 +5910,9 @@ const ADVANCEMENTS = [
   { id: 'eat', title: 'Time for Lunch', text: 'You ate some food!', emoji: '🍎' },
   { id: 'swim', title: 'Making a Splash', text: 'You went for a swim!', emoji: '🌊' },
   { id: 'night', title: 'Good Night', text: 'You saw the night sky!', emoji: '🌙' },
+  { id: 'farmer', title: 'Seed Planter', text: 'You planted a seed!', emoji: '🌱' },
+  { id: 'harvest', title: 'Farmer', text: 'You grew your own food!', emoji: '🌾' },
+  { id: 'sleep', title: 'Sweet Dreams', text: 'You slept in a bed!', emoji: '🛏️' },
 ];
 
 class Advancements {
@@ -5876,6 +6117,25 @@ function hint(html) {
   if (!html) { UI.el.hint.classList.add('hidden'); return; }
   UI.el.hint.innerHTML = html;
   UI.el.hint.classList.remove('hidden');
+}
+
+// Sleeping: fade to black, run `whileDark` (the clock jumps), fade back in,
+// then `after`. The overlay is made on first use so the template stays as is.
+let sleepOverlay = null;
+function sleepFade(whileDark, after) {
+  if (!sleepOverlay) {
+    sleepOverlay = document.createElement('div');
+    sleepOverlay.style.cssText =
+      'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;' +
+      'transition:opacity 1.2s ease;z-index:40';
+    document.body.appendChild(sleepOverlay);
+  }
+  sleepOverlay.style.opacity = '1';
+  setTimeout(() => {
+    whileDark();
+    sleepOverlay.style.opacity = '0';
+    setTimeout(after, 1200);
+  }, 1700);
 }
 
 function flashHurt() {
@@ -6373,6 +6633,19 @@ async function hasCloudSave(name) {
   }
 }
 
+// Firestore rejects arrays inside arrays, and the save is full of them
+// (inventory slots, chests, deltas, crops). So the payload travels as one JSON
+// string inside a map — the rules still see `data is map`. Older documents
+// stored the payload directly; unpackSave reads both.
+function packSave(data) { return { json: JSON.stringify(data) }; }
+function unpackSave(stored) {
+  if (!stored) return null;
+  if (typeof stored.json === 'string') {
+    try { return JSON.parse(stored.json); } catch (e) { return null; }
+  }
+  return stored;
+}
+
 async function loadCloudSave(name) {
   if (!isCloudEnabled()) return null;
   const id = normalizeName(name);
@@ -6381,7 +6654,7 @@ async function loadCloudSave(name) {
     const snap = await db.collection(SAVES_COLLECTION).doc(id).get();
     if (!snap.exists) return null;
     const doc = snap.data();
-    return doc && doc.data ? doc.data : null;
+    return doc ? unpackSave(doc.data) : null;
   } catch (e) {
     console.warn('Cloud load failed:', e);
     return null;
@@ -6400,7 +6673,7 @@ async function saveCloudSave(name, data, meta = {}) {
       schemaVersion: SCHEMA_VERSION,
       uid: authUid,
       classCode: meta.classCode || '',
-      data,
+      data: packSave(data),
     });
     return true;
   } catch (e) {
@@ -6440,7 +6713,7 @@ async function listCloudSaves() {
         displayName: d.displayName || doc.id,
         updatedAt: d.updatedAt || null,
         classCode: d.classCode || '',
-        data: d.data || {},
+        data: unpackSave(d.data) || {},
       };
     });
   } catch (e) {
@@ -6519,7 +6792,7 @@ const input = {
 };
 
 let renderer, scene, camera, materials, world, player, entities, sky, quests, advancements;
-let inventory, craftGrid, furnaces, chests, signs;
+let inventory, craftGrid, furnaces, chests, signs, farm;
 let outlineMesh, crackMesh, crackTextures;
 let hudScene, hudCamera, heldSprite;
 let particles = [];
@@ -6923,6 +7196,7 @@ function startGame(seed, saved) {
   furnaces = new Map();
   chests = new Map();
   signs = new Map();
+  farm = new Farm(world);
   advancements = new Advancements();
 
   sky = new Sky(scene, materials);
@@ -6953,6 +7227,11 @@ function startGame(seed, saved) {
       if (cc) cc.value = saved.classCode;
     }
     if (saved.signs) for (const [k, t] of saved.signs) signs.set(k, t);
+    farm.load(saved.crops);
+    if (Array.isArray(saved.spawn)) {
+      player.spawn.set(saved.spawn[0], saved.spawn[1], saved.spawn[2]);
+      player.spawnIsBed = !!saved.spawnIsBed;
+    }
     if (saved.chests) {
       for (const [k, arr] of saved.chests) {
         const set = new SlotSet(27);
@@ -7358,20 +7637,28 @@ function breakBlock(hit) {
   world.setBlock(hit.x, hit.y, hit.z, B.AIR);
 
   if (canHarvest(id, tool.type, tool.tier)) {
-    const drop = dropsOf(id, rand);
-    if (drop) entities.dropItem(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, drop, 1);
+    for (const [item, n] of dropsOf(id, rand)) entities.dropItem(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, item, n);
   }
+  if (bdef.crop) harvested(hit.x, hit.y, hit.z, bdef);
   Sfx.break_(materialOf(bdef.name));
   spawnParticles(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, bdef);
 
   // Plants and torches cannot float: knock down anything resting on top.
   const above = world.getBlock(hit.x, hit.y + 1, hit.z);
   if (above !== B.AIR && BLOCKS[above].render === 'cross') {
-    const d2 = dropsOf(above, rand);
     world.setBlock(hit.x, hit.y + 1, hit.z, B.AIR);
-    if (d2) entities.dropItem(hit.x + 0.5, hit.y + 1.5, hit.z + 0.5, d2, 1);
+    for (const [item, n] of dropsOf(above, rand)) entities.dropItem(hit.x + 0.5, hit.y + 1.5, hit.z + 0.5, item, n);
+    if (BLOCKS[above].crop) farm.forget(hit.x, hit.y + 1, hit.z);
   }
   resetMining();
+}
+
+// Picking a crop: a ripe one is the moment worth naming out loud.
+function harvested(x, y, z, bdef) {
+  farm.forget(x, y, z);
+  if (bdef.crop.stage < CROP_RIPE) return;
+  advancements.trigger('harvest');
+  say(quests.line('harvest', { word: CROPS[bdef.crop.name].word }));
 }
 
 function tryAttack() {
@@ -7413,9 +7700,13 @@ function useHeld() {
   if (!held) return;
   const def = ITEMS[held.item];
 
+  if (hit && farmAction(hit, def)) return;
+  if (bucketAction(def)) return;
+
   if (def.food) {
     if (player.eat(def.food)) {
       inventory.consumeHeld(1);
+      if (def.leaves) inventory.add(def.leaves, 1);
       Sfx.eat();
       advancements.trigger('eat');
       renderHotbar(inventory);
@@ -7438,6 +7729,118 @@ function useHeld() {
   }
 }
 
+// ================================================================= farming
+// What a right-click on this block would do with this item, for useHeld() and
+// the hint bar alike: 'till' (hoe on grass), 'plant' (seed on farmland) or null.
+// Aiming at a tuft of grass means the ground under it.
+function farmTarget(hit) {
+  if (!hit || hit.id !== B.TALL_GRASS) return hit;
+  return { x: hit.x, y: hit.y - 1, z: hit.z, id: world.getBlock(hit.x, hit.y - 1, hit.z), face: [0, 1, 0] };
+}
+
+function farmVerb(hit, def) {
+  hit = farmTarget(hit);
+  if (!hit || !def || hit.face[1] !== 1) return null;
+  const above = world.getBlock(hit.x, hit.y + 1, hit.z);
+  const clear = above === B.AIR || above === B.TALL_GRASS;
+  if (def.tool && def.tool.type === 'hoe' && clear &&
+      (hit.id === B.GRASS_BLOCK || hit.id === B.DIRT)) return 'till';
+  if (def.plants && hit.id === B.FARMLAND && above === B.AIR) return 'plant';
+  return null;
+}
+
+function farmAction(hit, def) {
+  hit = farmTarget(hit);
+  const verb = farmVerb(hit, def);
+  if (verb === 'till') {
+    world.setBlock(hit.x, hit.y + 1, hit.z, B.AIR);
+    world.setBlock(hit.x, hit.y, hit.z, B.FARMLAND);
+    Sfx.place(materialOf('dirt'));
+    swing();
+    say(quests.line('till', {}));
+    return true;
+  }
+  if (verb === 'plant') {
+    const cropId = B[def.plants.toUpperCase()];
+    world.setBlock(hit.x, hit.y + 1, hit.z, cropId);
+    farm.plant(hit.x, hit.y + 1, hit.z, sky.time);
+    inventory.consumeHeld(1);
+    renderHotbar(inventory);
+    Sfx.place(materialOf('grass_block'));
+    swing();
+    advancements.trigger('farmer');
+    say(quests.line('plant', { word: CROPS[BLOCKS[cropId].crop.name].word }));
+    return true;
+  }
+  return false;
+}
+
+// Buckets: scoop water, pour it back out, or milk a cow.
+function bucketAction(def) {
+  if (def.name !== 'bucket' && def.name !== 'water_bucket') return false;
+  const swap = (to) => {
+    inventory.consumeHeld(1);
+    inventory.add(to, 1);
+    renderHotbar(inventory);
+    swing();
+  };
+  if (def.name === 'bucket') {
+    const mob = entities.mobHit(player.eye(), player.forward(), 3.2);
+    if (mob && mob.type === 'cow') {
+      swap('milk_bucket');
+      say(quests.line('milk', {}));
+      return true;
+    }
+    const w = world.raycast(player.eye(), player.forward(), 5, true);
+    if (w && w.id === B.WATER) {
+      world.setBlock(w.x, w.y, w.z, B.AIR);
+      swap('water_bucket');
+      Sfx.splash();
+    }
+    return true; // an empty bucket does nothing else
+  }
+  const hit = currentTarget();
+  if (!hit) return true;
+  const nx = hit.x + hit.face[0], ny = hit.y + hit.face[1], nz = hit.z + hit.face[2];
+  const existing = world.getBlock(nx, ny, nz);
+  if (existing !== B.AIR && BLOCKS[existing].solid) return true;
+  world.setBlock(nx, ny, nz, B.WATER);
+  swap('bucket');
+  Sfx.splash();
+  return true;
+}
+
+// =================================================================== sleep
+// A bed always becomes home; at night it also skips to morning and counts
+// the day out loud.
+let sleeping = false;
+function trySleep(hit) {
+  if (sleeping) return;
+  const first = !player.spawnIsBed;
+  player.spawn.set(hit.x + 0.5, hit.y + 1.1, hit.z + 0.5);
+  player.spawnIsBed = true;
+  if (sky.daylight >= 0.5) {
+    say(quests.line(first ? 'bedSet' : 'cantSleep', {}));
+    if (first) toast('Your bed', 'You will wake up here.', '🛏️');
+    return;
+  }
+  sleeping = true;
+  say(quests.line('sleep', {}));
+  sleepFade(() => {
+    // Morning of the next day if it is late evening, of today if before dawn.
+    const dayStart = Math.floor(sky.time / DAY_LENGTH) * DAY_LENGTH;
+    sky.time = dayStart + (sky.phase > 0.5 ? DAY_LENGTH : 0) + 0.26 * DAY_LENGTH;
+    player.heal(4);
+    renderBars(player);
+    advancements.trigger('sleep');
+    saveGame();
+  }, () => {
+    sleeping = false;
+    const day = Math.floor(sky.time / DAY_LENGTH) + 1;
+    say(quests.line('wake', { n: numberWord(day), day }));
+  });
+}
+
 // The villager a right-click would talk to: close, with an errand, and in front
 // of the player. The hint bar and useHeld() must agree on this.
 function talkableVillager() {
@@ -7456,6 +7859,7 @@ function blockIntersectsPlayer(x, y, z) {
 }
 
 function openBlockScreen(kind, hit) {
+  if (kind === 'bed') { trySleep(hit); return; }   // no screen, keep playing
   if (document.exitPointerLock) document.exitPointerLock();
   const key = hit.x + ',' + hit.y + ',' + hit.z;
   if (kind === 'crafting_table') {
@@ -7650,6 +8054,7 @@ function loop(t) {
     quests.update(dt);
     sky.update(dt, camera, renderer);
     tickFurnaces(dt);
+    farm.update(dt, sky.time);
     updateMining(dt);
     updateParticles(dt);
     updateTutorial(dt);
@@ -7702,6 +8107,12 @@ function updateHints() {
     if (bd.interact === 'crafting_table') { hint('Right-click the <b>Crafting Table</b>'); return; }
     if (bd.interact === 'furnace') { hint('Right-click the <b>Furnace</b>'); return; }
     if (bd.interact === 'chest') { hint('Right-click the <b>Chest</b>'); return; }
+    if (bd.interact === 'bed') { hint('Right-click the <b>Bed</b> to sleep'); return; }
+    const heldName = inventory.heldItem();
+    const verb = farmVerb(hit, heldName ? ITEMS[heldName] : null);
+    if (verb === 'till') { hint('Right-click to <b>dig</b> the ground'); return; }
+    if (verb === 'plant') { hint('Right-click to <b>plant</b> the seeds'); return; }
+    if (bd.crop && bd.crop.stage >= CROP_RIPE) { hint('It is ready! <b>Pick</b> it.'); return; }
   }
   hint(null);
 }
@@ -7743,6 +8154,9 @@ function buildSavePayload() {
     questsCompleted: quests.completed,
     emeralds: quests.emeralds,
     signs: [...signs],
+    crops: farm.serialize(),
+    spawn: [player.spawn.x, player.spawn.y, player.spawn.z],
+    spawnIsBed: !!player.spawnIsBed,
     chests: [...chests].map(([k, c]) => [k, c.slots.map((x) => (x ? [x.item, x.count] : 0))]),
     furnaces: [...furnaces].map(([k, f]) => [k, {
       input: f.input ? [f.input.item, f.input.count] : 0,
@@ -7856,6 +8270,9 @@ async function boot() {
       openQuest(v, quests);
       return v.quest;
     },
+    get farm() { return farm; },
+    use() { useHeld(); },      // a right-click, for scripted checks
+    grow() { return farm.ripenAll(); },
     mineAt(x, y, z) {
       const id = world.getBlock(x, y, z);
       if (id === B.AIR) return null;

@@ -2,7 +2,7 @@
 // other module together; it deliberately keeps no world knowledge of its own.
 
 import * as THREE from 'three';
-import { B, BLOCKS, breakTime, canHarvest, TIER } from './blocks.js';
+import { B, BLOCKS, breakTime, canHarvest, TIER, CROPS, CROP_RIPE } from './blocks.js';
 import { buildAtlas, atlasCanvas, tileAverage, validateTiles } from './atlas.js';
 import { seedFromString, mulberry32 } from './noise.js';
 import { CHUNK_X, CHUNK_Z, CHUNK_Y, SEA_LEVEL, biomeAt, findSpawn } from './worldgen.js';
@@ -10,20 +10,21 @@ import { makeMaterials, computeLight, buildGeometry } from './chunk.js';
 import { World } from './world.js';
 import { ITEMS, itemLabel, itemIcon, dropsOf } from './items.js';
 import { smeltResult, fuelValue, findRecipe } from './crafting.js';
+import { Farm } from './farming.js';
 import { Inventory, SlotSet, HOTBAR_SIZE } from './inventory.js';
 import { Player, PLAYER_CONST } from './player.js';
 import { Entities, MOB_TYPES } from './entities.js';
 import { Sky, DAY_LENGTH } from './sky.js';
 import { initAudio, resumeAudio, startMusic, setMusicEnabled, Sfx, materialOf } from './audio.js';
 import { initSpeech, say, sayLines, setSpeechEnabled, Speech } from './speech.js';
-import { PACKS, YEARS, packById, packsForYear, defaultPackForYear } from './words.js';
+import { PACKS, YEARS, packById, packsForYear, defaultPackForYear, numberWord } from './words.js';
 import { QuestSystem, Advancements, validateWords } from './quests.js';
 import {
   UI, initUI, renderHotbar, renderBars, announceItem, toast, hint, flashHurt,
   setUnderwater, renderEmeralds, escapeHtml, openInventory, closeInventory, redrawInventory, openQuest,
   closeQuest, questOpen, openSign, signOpen, updateDebug, setDebugVisible, showTitle, showLoading,
   showPause, showHud, anyScreenOpen, openWordBook, closeWordBook, wordbookOpen,
-  openTeacher, closeTeacher, teacherOpen, setTutorialHint,
+  openTeacher, closeTeacher, teacherOpen, setTutorialHint, sleepFade,
 } from './ui.js';
 import {
   initSaves, normalizeName, localSaveKey, isCloudEnabled,
@@ -54,7 +55,7 @@ const input = {
 };
 
 let renderer, scene, camera, materials, world, player, entities, sky, quests, advancements;
-let inventory, craftGrid, furnaces, chests, signs;
+let inventory, craftGrid, furnaces, chests, signs, farm;
 let outlineMesh, crackMesh, crackTextures;
 let hudScene, hudCamera, heldSprite;
 let particles = [];
@@ -458,6 +459,7 @@ function startGame(seed, saved) {
   furnaces = new Map();
   chests = new Map();
   signs = new Map();
+  farm = new Farm(world);
   advancements = new Advancements();
 
   sky = new Sky(scene, materials);
@@ -488,6 +490,11 @@ function startGame(seed, saved) {
       if (cc) cc.value = saved.classCode;
     }
     if (saved.signs) for (const [k, t] of saved.signs) signs.set(k, t);
+    farm.load(saved.crops);
+    if (Array.isArray(saved.spawn)) {
+      player.spawn.set(saved.spawn[0], saved.spawn[1], saved.spawn[2]);
+      player.spawnIsBed = !!saved.spawnIsBed;
+    }
     if (saved.chests) {
       for (const [k, arr] of saved.chests) {
         const set = new SlotSet(27);
@@ -893,20 +900,28 @@ function breakBlock(hit) {
   world.setBlock(hit.x, hit.y, hit.z, B.AIR);
 
   if (canHarvest(id, tool.type, tool.tier)) {
-    const drop = dropsOf(id, rand);
-    if (drop) entities.dropItem(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, drop, 1);
+    for (const [item, n] of dropsOf(id, rand)) entities.dropItem(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, item, n);
   }
+  if (bdef.crop) harvested(hit.x, hit.y, hit.z, bdef);
   Sfx.break_(materialOf(bdef.name));
   spawnParticles(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, bdef);
 
   // Plants and torches cannot float: knock down anything resting on top.
   const above = world.getBlock(hit.x, hit.y + 1, hit.z);
   if (above !== B.AIR && BLOCKS[above].render === 'cross') {
-    const d2 = dropsOf(above, rand);
     world.setBlock(hit.x, hit.y + 1, hit.z, B.AIR);
-    if (d2) entities.dropItem(hit.x + 0.5, hit.y + 1.5, hit.z + 0.5, d2, 1);
+    for (const [item, n] of dropsOf(above, rand)) entities.dropItem(hit.x + 0.5, hit.y + 1.5, hit.z + 0.5, item, n);
+    if (BLOCKS[above].crop) farm.forget(hit.x, hit.y + 1, hit.z);
   }
   resetMining();
+}
+
+// Picking a crop: a ripe one is the moment worth naming out loud.
+function harvested(x, y, z, bdef) {
+  farm.forget(x, y, z);
+  if (bdef.crop.stage < CROP_RIPE) return;
+  advancements.trigger('harvest');
+  say(quests.line('harvest', { word: CROPS[bdef.crop.name].word }));
 }
 
 function tryAttack() {
@@ -948,9 +963,13 @@ function useHeld() {
   if (!held) return;
   const def = ITEMS[held.item];
 
+  if (hit && farmAction(hit, def)) return;
+  if (bucketAction(def)) return;
+
   if (def.food) {
     if (player.eat(def.food)) {
       inventory.consumeHeld(1);
+      if (def.leaves) inventory.add(def.leaves, 1);
       Sfx.eat();
       advancements.trigger('eat');
       renderHotbar(inventory);
@@ -973,6 +992,118 @@ function useHeld() {
   }
 }
 
+// ================================================================= farming
+// What a right-click on this block would do with this item, for useHeld() and
+// the hint bar alike: 'till' (hoe on grass), 'plant' (seed on farmland) or null.
+// Aiming at a tuft of grass means the ground under it.
+function farmTarget(hit) {
+  if (!hit || hit.id !== B.TALL_GRASS) return hit;
+  return { x: hit.x, y: hit.y - 1, z: hit.z, id: world.getBlock(hit.x, hit.y - 1, hit.z), face: [0, 1, 0] };
+}
+
+function farmVerb(hit, def) {
+  hit = farmTarget(hit);
+  if (!hit || !def || hit.face[1] !== 1) return null;
+  const above = world.getBlock(hit.x, hit.y + 1, hit.z);
+  const clear = above === B.AIR || above === B.TALL_GRASS;
+  if (def.tool && def.tool.type === 'hoe' && clear &&
+      (hit.id === B.GRASS_BLOCK || hit.id === B.DIRT)) return 'till';
+  if (def.plants && hit.id === B.FARMLAND && above === B.AIR) return 'plant';
+  return null;
+}
+
+function farmAction(hit, def) {
+  hit = farmTarget(hit);
+  const verb = farmVerb(hit, def);
+  if (verb === 'till') {
+    world.setBlock(hit.x, hit.y + 1, hit.z, B.AIR);
+    world.setBlock(hit.x, hit.y, hit.z, B.FARMLAND);
+    Sfx.place(materialOf('dirt'));
+    swing();
+    say(quests.line('till', {}));
+    return true;
+  }
+  if (verb === 'plant') {
+    const cropId = B[def.plants.toUpperCase()];
+    world.setBlock(hit.x, hit.y + 1, hit.z, cropId);
+    farm.plant(hit.x, hit.y + 1, hit.z, sky.time);
+    inventory.consumeHeld(1);
+    renderHotbar(inventory);
+    Sfx.place(materialOf('grass_block'));
+    swing();
+    advancements.trigger('farmer');
+    say(quests.line('plant', { word: CROPS[BLOCKS[cropId].crop.name].word }));
+    return true;
+  }
+  return false;
+}
+
+// Buckets: scoop water, pour it back out, or milk a cow.
+function bucketAction(def) {
+  if (def.name !== 'bucket' && def.name !== 'water_bucket') return false;
+  const swap = (to) => {
+    inventory.consumeHeld(1);
+    inventory.add(to, 1);
+    renderHotbar(inventory);
+    swing();
+  };
+  if (def.name === 'bucket') {
+    const mob = entities.mobHit(player.eye(), player.forward(), 3.2);
+    if (mob && mob.type === 'cow') {
+      swap('milk_bucket');
+      say(quests.line('milk', {}));
+      return true;
+    }
+    const w = world.raycast(player.eye(), player.forward(), 5, true);
+    if (w && w.id === B.WATER) {
+      world.setBlock(w.x, w.y, w.z, B.AIR);
+      swap('water_bucket');
+      Sfx.splash();
+    }
+    return true; // an empty bucket does nothing else
+  }
+  const hit = currentTarget();
+  if (!hit) return true;
+  const nx = hit.x + hit.face[0], ny = hit.y + hit.face[1], nz = hit.z + hit.face[2];
+  const existing = world.getBlock(nx, ny, nz);
+  if (existing !== B.AIR && BLOCKS[existing].solid) return true;
+  world.setBlock(nx, ny, nz, B.WATER);
+  swap('bucket');
+  Sfx.splash();
+  return true;
+}
+
+// =================================================================== sleep
+// A bed always becomes home; at night it also skips to morning and counts
+// the day out loud.
+let sleeping = false;
+function trySleep(hit) {
+  if (sleeping) return;
+  const first = !player.spawnIsBed;
+  player.spawn.set(hit.x + 0.5, hit.y + 1.1, hit.z + 0.5);
+  player.spawnIsBed = true;
+  if (sky.daylight >= 0.5) {
+    say(quests.line(first ? 'bedSet' : 'cantSleep', {}));
+    if (first) toast('Your bed', 'You will wake up here.', '🛏️');
+    return;
+  }
+  sleeping = true;
+  say(quests.line('sleep', {}));
+  sleepFade(() => {
+    // Morning of the next day if it is late evening, of today if before dawn.
+    const dayStart = Math.floor(sky.time / DAY_LENGTH) * DAY_LENGTH;
+    sky.time = dayStart + (sky.phase > 0.5 ? DAY_LENGTH : 0) + 0.26 * DAY_LENGTH;
+    player.heal(4);
+    renderBars(player);
+    advancements.trigger('sleep');
+    saveGame();
+  }, () => {
+    sleeping = false;
+    const day = Math.floor(sky.time / DAY_LENGTH) + 1;
+    say(quests.line('wake', { n: numberWord(day), day }));
+  });
+}
+
 // The villager a right-click would talk to: close, with an errand, and in front
 // of the player. The hint bar and useHeld() must agree on this.
 function talkableVillager() {
@@ -991,6 +1122,7 @@ function blockIntersectsPlayer(x, y, z) {
 }
 
 function openBlockScreen(kind, hit) {
+  if (kind === 'bed') { trySleep(hit); return; }   // no screen, keep playing
   if (document.exitPointerLock) document.exitPointerLock();
   const key = hit.x + ',' + hit.y + ',' + hit.z;
   if (kind === 'crafting_table') {
@@ -1185,6 +1317,7 @@ function loop(t) {
     quests.update(dt);
     sky.update(dt, camera, renderer);
     tickFurnaces(dt);
+    farm.update(dt, sky.time);
     updateMining(dt);
     updateParticles(dt);
     updateTutorial(dt);
@@ -1237,6 +1370,12 @@ function updateHints() {
     if (bd.interact === 'crafting_table') { hint('Right-click the <b>Crafting Table</b>'); return; }
     if (bd.interact === 'furnace') { hint('Right-click the <b>Furnace</b>'); return; }
     if (bd.interact === 'chest') { hint('Right-click the <b>Chest</b>'); return; }
+    if (bd.interact === 'bed') { hint('Right-click the <b>Bed</b> to sleep'); return; }
+    const heldName = inventory.heldItem();
+    const verb = farmVerb(hit, heldName ? ITEMS[heldName] : null);
+    if (verb === 'till') { hint('Right-click to <b>dig</b> the ground'); return; }
+    if (verb === 'plant') { hint('Right-click to <b>plant</b> the seeds'); return; }
+    if (bd.crop && bd.crop.stage >= CROP_RIPE) { hint('It is ready! <b>Pick</b> it.'); return; }
   }
   hint(null);
 }
@@ -1278,6 +1417,9 @@ function buildSavePayload() {
     questsCompleted: quests.completed,
     emeralds: quests.emeralds,
     signs: [...signs],
+    crops: farm.serialize(),
+    spawn: [player.spawn.x, player.spawn.y, player.spawn.z],
+    spawnIsBed: !!player.spawnIsBed,
     chests: [...chests].map(([k, c]) => [k, c.slots.map((x) => (x ? [x.item, x.count] : 0))]),
     furnaces: [...furnaces].map(([k, f]) => [k, {
       input: f.input ? [f.input.item, f.input.count] : 0,
@@ -1391,6 +1533,9 @@ async function boot() {
       openQuest(v, quests);
       return v.quest;
     },
+    get farm() { return farm; },
+    use() { useHeld(); },      // a right-click, for scripted checks
+    grow() { return farm.ripenAll(); },
     mineAt(x, y, z) {
       const id = world.getBlock(x, y, z);
       if (id === B.AIR) return null;

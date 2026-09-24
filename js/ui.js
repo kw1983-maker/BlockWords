@@ -188,6 +188,25 @@ export function hint(html) {
   UI.el.hint.classList.remove('hidden');
 }
 
+// Sleeping: fade to black, run `whileDark` (the clock jumps), fade back in,
+// then `after`. The overlay is made on first use so the template stays as is.
+let sleepOverlay = null;
+export function sleepFade(whileDark, after) {
+  if (!sleepOverlay) {
+    sleepOverlay = document.createElement('div');
+    sleepOverlay.style.cssText =
+      'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;' +
+      'transition:opacity 1.2s ease;z-index:40';
+    document.body.appendChild(sleepOverlay);
+  }
+  sleepOverlay.style.opacity = '1';
+  setTimeout(() => {
+    whileDark();
+    sleepOverlay.style.opacity = '0';
+    setTimeout(after, 1200);
+  }, 1700);
+}
+
 export function flashHurt() {
   UI.el.hurt.style.opacity = '1';
   setTimeout(() => { UI.el.hurt.style.opacity = '0'; }, 120);

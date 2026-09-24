@@ -388,6 +388,9 @@ export const ADVANCEMENTS = [
   { id: 'eat', title: 'Time for Lunch', text: 'You ate some food!', emoji: '🍎' },
   { id: 'swim', title: 'Making a Splash', text: 'You went for a swim!', emoji: '🌊' },
   { id: 'night', title: 'Good Night', text: 'You saw the night sky!', emoji: '🌙' },
+  { id: 'farmer', title: 'Seed Planter', text: 'You planted a seed!', emoji: '🌱' },
+  { id: 'harvest', title: 'Farmer', text: 'You grew your own food!', emoji: '🌾' },
+  { id: 'sleep', title: 'Sweet Dreams', text: 'You slept in a bed!', emoji: '🛏️' },
 ];
 
 export class Advancements {

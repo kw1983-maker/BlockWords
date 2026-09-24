@@ -27,8 +27,10 @@ function def(name, o = {}) {
     needs: o.needs || TIER.HAND,
     light: o.light || 0,
     drops: o.drops !== undefined ? o.drops : name, // item name, null, or special
-    interact: o.interact || null,     // crafting_table | furnace | chest | sign
+    interact: o.interact || null,     // crafting_table | furnace | chest | sign | bed
     liquid: o.render === 'liquid',
+    height: o.height || 1,            // < 1 for low cubes (farmland, bed)
+    crop: o.crop || null,             // { name, stage } for growing plants
   };
   BLOCKS.push(b);
   B[name.toUpperCase()] = id;
@@ -60,6 +62,10 @@ def('gravel', { hardness: 0.6, tool: 'shovel' });
 def('snow_block', { label: 'Snow', hardness: 0.2, tool: 'shovel', tiles: 'snow' });
 def('ice', { hardness: 0.5, tool: 'pickaxe', opaque: false, drops: null });
 def('clay', { hardness: 0.6, tool: 'shovel' });
+def('farmland', {
+  hardness: 0.6, tool: 'shovel', drops: 'dirt', opaque: false, height: 15 / 16,
+  tiles: { top: 'farmland_top', bottom: 'dirt', side: 'dirt' },
+});
 
 // ---- ores ---------------------------------------------------------------
 def('coal_ore', { hardness: 3, tool: 'pickaxe', needs: TIER.WOOD, drops: 'coal' });
@@ -85,6 +91,22 @@ def('rose', { label: 'Red Flower', render: 'cross', solid: false, hardness: 0.05
 def('dandelion', { label: 'Yellow Flower', render: 'cross', solid: false, hardness: 0.05 });
 def('sugar_cane', { render: 'cross', solid: false, hardness: 0.1 });
 def('cactus', { hardness: 0.4, opaque: false, tiles: { top: 'cactus_top', bottom: 'cactus_top', side: 'cactus' } });
+// ---- crops: one block per growth stage (a voxel is one byte, no metadata) --
+export const CROPS = {
+  wheat: { seed: 'wheat_seeds', produce: 'wheat', word: 'wheat' },
+  carrots: { seed: 'carrot', produce: 'carrot', word: 'carrots' },
+  potatoes: { seed: 'potato', produce: 'potato', word: 'potatoes' },
+};
+export const CROP_RIPE = 3;
+for (const crop of Object.keys(CROPS)) {
+  for (let stage = 0; stage <= CROP_RIPE; stage++) {
+    def(crop + '_' + stage, {
+      label: crop.charAt(0).toUpperCase() + crop.slice(1),
+      render: 'cross', solid: false, hardness: 0, drops: 'crop',
+      crop: { name: crop, stage },
+    });
+  }
+}
 def('pumpkin', { hardness: 1, tool: 'axe', tiles: { top: 'pumpkin_top', bottom: 'pumpkin_top', side: 'pumpkin' } });
 
 // ---- crafted / utility --------------------------------------------------
@@ -105,6 +127,10 @@ def('chest', {
   tiles: { top: 'chest_top', bottom: 'chest_top', side: 'chest_side' },
 });
 def('sign', { render: 'cross', solid: false, hardness: 1, tool: 'axe', interact: 'sign', tiles: 'sign' });
+def('bed', {
+  hardness: 0.4, tool: 'axe', interact: 'bed', opaque: false, height: 9 / 16,
+  tiles: { top: 'bed_top', bottom: 'oak_planks', side: 'bed_side' },
+});
 def('bookshelf', { hardness: 1.5, tool: 'axe', tiles: { top: 'oak_planks', bottom: 'oak_planks', side: 'bookshelf' } });
 
 // ---- wool: the colour vocabulary, one block per colour -------------------

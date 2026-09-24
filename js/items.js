@@ -2,7 +2,7 @@
 // things you cannot place — tools, ingots, food. Item icons are drawn in code:
 // blocks as little isometric cubes, everything else as pixel art.
 
-import { BLOCKS, B, TIER } from './blocks.js';
+import { BLOCKS, B, TIER, CROPS, CROP_RIPE } from './blocks.js';
 import { atlasCanvas, TILE, COLS, TILE_INDEX } from './atlas.js';
 
 export const ITEMS = {}; // name -> definition
@@ -16,6 +16,7 @@ function item(name, o = {}) {
     tool: null,   // { type: 'pickaxe'|'axe'|'shovel'|'sword', tier }
     food: null,   // { hunger, heal }
     fuel: 0,      // smelting ticks this item is worth
+    plants: null, // crop block this item plants on farmland ('wheat_0')
   }, o);
   return ITEMS[name];
 }
@@ -23,6 +24,7 @@ function item(name, o = {}) {
 // --- every placeable block is an item -----------------------------------
 for (const b of BLOCKS) {
   if (b.name === 'air' || b.name === 'water' || b.name === 'bedrock') continue;
+  if (b.crop || b.name === 'farmland') continue; // only made in the world
   item(b.name, { label: b.label, block: b.id });
 }
 ITEMS.oak_log.fuel = 300;
@@ -46,6 +48,9 @@ item('leather', { label: 'Leather' });
 item('wheat', { label: 'Wheat' });
 item('clay_ball', { label: 'Clay Ball' });
 item('egg', { label: 'Egg', stack: 16 });
+item('wheat_seeds', { label: 'Seeds', plants: 'wheat_0' });
+item('bucket', { label: 'Bucket', stack: 16 });
+item('water_bucket', { label: 'Water Bucket', stack: 1 });
 
 // --- food ---------------------------------------------------------------
 item('apple', { label: 'Apple', stack: 64, food: { hunger: 4, heal: 0 } });
@@ -58,6 +63,10 @@ item('raw_mutton', { label: 'Raw Mutton', food: { hunger: 3, heal: 0 } });
 item('cooked_mutton', { label: 'Cooked Mutton', food: { hunger: 7, heal: 2 } });
 item('raw_chicken', { label: 'Raw Chicken', food: { hunger: 2, heal: 0 } });
 item('cooked_chicken', { label: 'Cooked Chicken', food: { hunger: 6, heal: 2 } });
+item('carrot', { label: 'Carrot', food: { hunger: 3, heal: 1 }, plants: 'carrots_0' });
+item('potato', { label: 'Potato', food: { hunger: 1, heal: 0 }, plants: 'potatoes_0' });
+item('baked_potato', { label: 'Baked Potato', food: { hunger: 5, heal: 1 } });
+item('milk_bucket', { label: 'Milk', stack: 1, food: { hunger: 2, heal: 2 }, leaves: 'bucket' });
 
 // --- tools --------------------------------------------------------------
 const TOOL_TIERS = [
@@ -65,7 +74,7 @@ const TOOL_TIERS = [
   ['iron', TIER.IRON], ['diamond', TIER.DIAMOND],
 ];
 for (const [mat, tier] of TOOL_TIERS) {
-  for (const type of ['pickaxe', 'axe', 'shovel', 'sword']) {
+  for (const type of ['pickaxe', 'axe', 'shovel', 'hoe', 'sword']) {
     item(mat + '_' + type, {
       label: mat.charAt(0).toUpperCase() + mat.slice(1) + ' ' + type.charAt(0).toUpperCase() + type.slice(1),
       stack: 1,
@@ -154,6 +163,8 @@ function toolIcon(mat, type) {
       px(9, 5, dark, 3, 1); px(13, 3, dark, 1, 2);
     } else if (type === 'shovel') {
       px(10, 2, light, 4, 1); px(10, 3, light, 4, 2); px(11, 5, dark, 2, 1);
+    } else if (type === 'hoe') {
+      px(8, 3, light, 5, 1); px(8, 4, dark, 2, 1); px(12, 4, dark, 1, 2);
     } else {
       for (let i = 0; i < 8; i++) px(6 + i, 9 - i, light, 1, 1); // blade
       for (let i = 0; i < 7; i++) px(7 + i, 9 - i, dark, 1, 1);
@@ -178,6 +189,13 @@ const PIXEL_ICONS = {
   egg: (px) => { px(6, 4, '#f6efe0', 4, 1); px(5, 5, '#f6efe0', 6, 5); px(6, 10, '#e2d8c4', 4, 1); px(6, 6, '#fffdf6', 2, 2); },
   apple: (px) => { px(5, 5, '#d8342f', 6, 6); px(4, 6, '#d8342f', 8, 4); px(6, 4, '#7a4b22', 1, 2); px(7, 3, '#4f9e3a', 3, 1); px(6, 6, '#f06a5f', 2, 2); },
   bread: (px) => { px(3, 6, '#c58a3d', 10, 5); px(4, 5, '#d8a055', 8, 1); px(5, 7, '#a86e2a', 1, 2); px(8, 7, '#a86e2a', 1, 2); },
+  wheat_seeds: (px) => { for (const [x, y] of [[5, 6], [8, 5], [10, 8], [6, 9], [9, 11], [4, 11]]) { px(x, y, '#6aa84f', 2, 1); px(x, y + 1, '#3f7a2a', 1, 1); } },
+  carrot: (px) => { for (let i = 0; i < 6; i++) px(5 + i, 11 - i, '#ec8024', 2, 2); px(4, 12, '#c8621a', 1, 1); px(11, 3, '#4f9e3a', 2, 2); px(12, 2, '#3f8a2e', 2, 1); },
+  potato: (px) => { px(5, 6, '#c9a15c', 6, 5); px(4, 7, '#c9a15c', 8, 3); px(6, 7, '#a88040', 1, 1); px(9, 9, '#a88040', 1, 1); },
+  baked_potato: (px) => { px(5, 6, '#b8742e', 6, 5); px(4, 7, '#b8742e', 8, 3); px(6, 7, '#f0d890', 4, 2); },
+  bucket: (px) => { px(4, 5, '#c8c8c8', 8, 1); px(4, 6, '#a0a0a0', 1, 6); px(11, 6, '#a0a0a0', 1, 6); px(5, 11, '#a0a0a0', 6, 1); px(5, 6, '#3a3a3a', 6, 5); },
+  water_bucket: (px) => { px(4, 5, '#c8c8c8', 8, 1); px(4, 6, '#a0a0a0', 1, 6); px(11, 6, '#a0a0a0', 1, 6); px(5, 11, '#a0a0a0', 6, 1); px(5, 6, '#3a6fd8', 6, 5); px(6, 6, '#6a9af0', 2, 1); },
+  milk_bucket: (px) => { px(4, 5, '#c8c8c8', 8, 1); px(4, 6, '#a0a0a0', 1, 6); px(11, 6, '#a0a0a0', 1, 6); px(5, 11, '#a0a0a0', 6, 1); px(5, 6, '#f6f6f2', 6, 5); },
 };
 function meatIcon(raw, colA, colB) {
   return (px) => {
@@ -216,12 +234,25 @@ export function itemIcon(name) {
   return url;
 }
 
-// What a block gives you when it breaks. `apple_chance` is the oak-leaf rule:
-// most leaves give nothing, now and then one drops an apple.
+// What a block gives you when it breaks, as a list of [item, count] — empty
+// for nothing. `apple_chance` is the oak-leaf rule: most leaves give nothing,
+// now and then one drops an apple. A crop gives back its seed until it is ripe,
+// and a real harvest once it is.
 export function dropsOf(blockId, rand) {
-  const d = BLOCKS[blockId].drops;
-  if (!d) return null;
-  if (d === 'apple_chance') return rand() < 0.06 ? 'apple' : null;
-  if (d === 'wheat_chance') return rand() < 0.3 ? 'wheat' : null;
-  return ITEMS[d] ? d : null;
+  const b = BLOCKS[blockId];
+  const d = b.drops;
+  if (!d) return [];
+  if (d === 'apple_chance') return rand() < 0.06 ? [['apple', 1]] : [];
+  if (d === 'wheat_chance') {
+    const r = rand();
+    return r < 0.25 ? [['wheat_seeds', 1]] : r < 0.35 ? [['wheat', 1]] : [];
+  }
+  if (d === 'crop') {
+    const c = CROPS[b.crop.name];
+    if (b.crop.stage < CROP_RIPE) return [[c.seed, 1]];
+    if (c.produce === c.seed) return [[c.produce, 2 + Math.floor(rand() * 3)]];
+    const seeds = Math.floor(rand() * 3);
+    return seeds ? [[c.produce, 1], [c.seed, seeds]] : [[c.produce, 1]];
+  }
+  return ITEMS[d] ? [[d, 1]] : [];
 }

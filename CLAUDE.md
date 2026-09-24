@@ -40,6 +40,10 @@ python -m http.server 8000
 python build.py
 ```
 
+A plain `python build.py` inlines the ElevenLabs key from `.env.local`, which is
+fine for local testing. **Before committing `index.html`, rebuild with
+`python build.py --prod`**, which leaves the key out.
+
 `build.py` strips `import`/`export` (single- and multi-line), concatenates every
 module in dependency order into one inline `<script type="module">`, and inlines
 the CSS. **Every module ends up in one shared scope**, so:
@@ -50,7 +54,7 @@ the CSS. **Every module ends up in one shared scope**, so:
 
 Build order (defined in `build.py`):
 `noise → blocks → atlas → worldgen → chunk → world → items → crafting →
-inventory → player → entities → sky → audio → speech → words → quests → ui →
+farming → inventory → player → entities → sky → audio → speech → words → quests → ui →
 firebase-config (optional) → saves → main`
 
 ## Architecture
@@ -62,7 +66,9 @@ identically in any order.
 **`js/blocks.js`** — the block registry. `B.STONE` → id, `BLOCKS[id]` → definition
 (`tiles`, `render`, `solid`, `opaque`, `hardness`, `tool`, `needs`, `light`,
 `drops`, `interact`). `breakTime()` and `canHarvest()` implement the mining
-formula. **Never hardcode numeric block ids.**
+formula. **Never hardcode numeric block ids.** A voxel is one byte with no metadata,
+so each crop growth stage is its own block (`wheat_0..3`, see `CROPS`), and
+`height` < 1 makes a low cube (farmland, the one-block bed).
 
 **`js/atlas.js`** — the 16×16 pixel-art texture atlas, drawn to a canvas at load
 time. `tileUV(name)` gives the atlas rectangle; `validateTiles()` warns if a
@@ -84,6 +90,9 @@ Three.js scene; it returns geometry. Two things happen:
   reason. This is the hot path — it went from ~45 ms to ~2 ms per chunk by
   removing bounds checks, closures and object lookups from it. Keep it that way.
 
+Low cubes use the `TOPOFF` table (one read per face) to drop their top
+corners, the same way water lowers its surface.
+
 `makeMaterials()` builds the one shader the world uses. Vertex light is stored
 per-vertex as `(skylight, blocklight, ao × faceShade)`; the day/night cycle only
 moves the `uDaylight` uniform, so **dusk never triggers a remesh**.
@@ -95,11 +104,17 @@ world. A chunk is only lit and meshed once its four neighbours are generated.
 
 **`js/items.js`** — item registry (every block plus tools, ingots, food). Icons
 are drawn in code: blocks as isometric cubes composed from atlas tiles, the rest
-as pixel art. `dropsOf()` handles the special drops (`apple_chance`,
-`wheat_chance`).
+as pixel art. `dropsOf()` returns a list of `[item, count]` and handles the special drops
+(`apple_chance`, `wheat_chance`, `crop`). Items with `plants` go into farmland.
 
 **`js/crafting.js`** — shaped and shapeless recipes, matched anywhere in the grid,
 plus the smelting table.
+
+**`js/farming.js`** — `Farm` tracks player-planted crops as `'x,y,z' → time
+planted` (`sky.time`). Growth is a function of elapsed time
+(`GROW_STAGE_SECONDS`, faster with water within 4 blocks), so unloaded fields
+catch up on reload. Saved as `crops`. Villages generate a ready-grown field
+beside the well (`villageFarm()` in `worldgen.js`) and a bed in every house.
 
 **`js/inventory.js`** — 9 hotbar + 27 storage slots, stacking, `SlotSet` for
 crafting grids, furnaces and chests.
@@ -182,6 +197,7 @@ MC.tp(x, y, z)          MC.give('diamond', 5)     MC.setTime(0.5)
 MC.setYear(4)           MC.setPack('eating')      MC.PACKS / MC.YEARS
 MC.talk(0, 'fetch')     MC.completeQuest()        MC.findVillager()
 MC.craft(['oak_log'], 2)                          MC.smelt('iron_ore')
+MC.use()               MC.grow()                 // right-click; ripen all crops
 MC.mineAt(x, y, z)      MC.profile()   // ms to generate/light/mesh one chunk
 MC.save()               MC.fps()
 ```

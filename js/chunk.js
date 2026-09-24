@@ -167,6 +167,7 @@ const AO_LEVELS = [0.42, 0.62, 0.81, 1.0];
 let OPAQUE = null;   // 1 = hides the face behind it
 let RENDERT = null;  // 0 = cube, 1 = cross, 2 = liquid
 let UVTAB = null;    // [blockId][face] -> u0, v0, u1, v1
+let TOPOFF = null;   // how far a cube's top sits below 1 (farmland, bed)
 
 // Built after the atlas exists, which is why this is lazy rather than top level.
 function ensureTables() {
@@ -175,9 +176,12 @@ function ensureTables() {
   OPAQUE = new Uint8Array(n);
   RENDERT = new Uint8Array(n);
   UVTAB = new Float32Array(n * 6 * 4);
+  TOPOFF = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const b = BLOCKS[i];
     OPAQUE[i] = b.opaque ? 1 : 0;
+    // water sits just below a full block, like the original
+    TOPOFF[i] = b.render === 'liquid' ? -0.12 : b.height - 1;
     RENDERT[i] = b.render === 'cross' ? 1 : b.render === 'liquid' ? 2 : 0;
     if (b.name === 'air') continue;
     for (let d = 0; d < 6; d++) {
@@ -336,11 +340,12 @@ export function buildGeometry(chunk, world) {
 
           grow(buf, 4, 6);
           const base = buf.nVert;
+          // Low cubes drop every top corner; water only lowers its surface.
+          const topOff = (rt === 0 || d === 2) ? TOPOFF[id] : 0;
           for (let c = 0; c < 4; c++) {
             const corner = f.corners[c];
             const vx = corner[0], vy = corner[1], vz = corner[2];
-            // water sits just below a full block, like the original
-            const yOff = (rt === 2 && d === 2 && vy === 1) ? -0.12 : 0;
+            const yOff = vy === 1 ? topOff : 0;
             buf.pos[buf.nPos++] = x + vx;
             buf.pos[buf.nPos++] = y + vy + yOff;
             buf.pos[buf.nPos++] = z + vz;

@@ -30,6 +30,7 @@ JS_ORDER = [
     "js/world.js",
     "js/items.js",
     "js/crafting.js",
+    "js/farming.js",
     "js/inventory.js",
     "js/player.js",
     "js/entities.js",

@@ -213,6 +213,54 @@ tile('pumpkin', (p) => {
 });
 tile('pumpkin_top', (p) => { p.fill([196, 112, 20], 12); p.rect(6, 6, 4, 4, [124, 96, 40]); });
 
+// Tilled soil: dark, damp rows of earth.
+tile('farmland_top', (p) => {
+  p.fill([96, 64, 40], 10);
+  for (let y = 1; y < TILE; y += 4) p.rect(0, y, TILE, 2, [72, 46, 28], 6);
+});
+
+// Crops get taller and fuller with each stage; the last stage shows the food.
+const CROP_STEM = [[96, 170, 60], [84, 160, 52], [78, 150, 46], [70, 140, 40]];
+function cropTile(name, stage, draw) {
+  tile(name + '_' + stage, (p) => {
+    p.clear();
+    const h = 4 + stage * 3;                       // 4, 7, 10, 13 pixels tall
+    const col = CROP_STEM[stage];
+    for (let x = 1; x < TILE; x += 3) {
+      const hh = h - ((x * 7) % 3);
+      p.rect(x, TILE - hh, 1, hh, col, 8);
+    }
+    if (draw) draw(p, h);
+  });
+}
+for (let s = 0; s <= 3; s++) {
+  cropTile('wheat', s, s === 3 ? (p, h) => {
+    for (let x = 1; x < TILE; x += 3) p.rect(x - 1, TILE - h, 3, 4, [214, 186, 84], 14); // grain heads
+  } : null);
+  cropTile('carrots', s, s === 3 ? (p) => {
+    for (let x = 2; x < TILE; x += 5) p.rect(x, TILE - 2, 3, 2, [236, 128, 36], 10);   // orange tops
+  } : null);
+  cropTile('potatoes', s, s === 3 ? (p) => {
+    for (let x = 1; x < TILE; x += 5) p.rect(x, TILE - 2, 4, 2, [200, 164, 96], 10);   // potatoes peeping out
+  } : null);
+}
+
+// A one-block bed: red blanket, white pillow at one end.
+tile('bed_top', (p) => {
+  p.fill([180, 40, 40], 10);
+  p.rect(0, 0, TILE, 5, [238, 238, 232], 6);
+  p.rect(0, 5, TILE, 1, [140, 30, 30]);
+});
+// Low blocks squash their side tile into the block's height, so this is drawn
+// full-size: blanket on top, wooden frame below.
+tile('bed_side', (p) => {
+  p.rect(0, 0, TILE, 9, [180, 40, 40], 10);
+  p.rect(0, 0, TILE, 1, [206, 64, 64]);
+  p.rect(0, 9, TILE, 7, OAK, 8);
+  p.rect(0, 9, 2, 7, [126, 100, 58]);
+  p.rect(14, 9, 2, 7, [126, 100, 58]);
+});
+
 tile('glass', (p) => {
   p.clear();
   p.rect(0, 0, TILE, 1, [214, 236, 240], 0, 210);

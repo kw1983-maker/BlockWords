@@ -276,6 +276,40 @@ function buildHouse(seed, house, put) {
   put(doorX, y, z0 - 1, B.AIR);
   put(x0 + 1, y + wallTop - 1, z0 + 1, B.GLOWSTONE);
   put(x0 + w - 2, y + 1, z0 + d - 2, B.CRAFTING_TABLE);
+  put(x0 + 1, y + 1, z0 + d - 2, B.BED);
+}
+
+// A 7x5 field beside the well: a water channel down the middle and ripe
+// wheat, carrots and potatoes, so the first harvest (and the first seeds) are
+// right next to where the player starts. Deterministic, like the houses.
+const FARM_W = 7, FARM_D = 5;
+const FARM_ROWS = ['WHEAT_3', 'CARROTS_3', null, 'POTATOES_3', 'WHEAT_3'];
+export function villageFarm(seed, village) {
+  const houses = villageHouses(seed, village);
+  const offsets = [[6, -2], [-12, -2], [-3, 6], [-3, -10]];
+  for (const [ox, oz] of offsets) {
+    const x0 = village.x + ox, z0 = village.z + oz;
+    const clash = houses.some((h) => {
+      const hx0 = h.x - (h.w >> 1) - 2, hz0 = h.z - (h.d >> 1) - 2;
+      return x0 < hx0 + h.w + 4 && x0 + FARM_W > hx0 && z0 < hz0 + h.d + 4 && z0 + FARM_D > hz0;
+    });
+    if (!clash) return { x0, z0 };
+  }
+  return null;
+}
+
+function buildFarm(seed, farm, put) {
+  for (let dx = 0; dx < FARM_W; dx++) {
+    for (let dz = 0; dz < FARM_D; dz++) {
+      const x = farm.x0 + dx, z = farm.z0 + dz;
+      const y = heightAt(seed, x, z);
+      if (y <= SEA_LEVEL) continue;
+      const row = FARM_ROWS[dz];
+      put(x, y, z, row ? B.FARMLAND : B.WATER, true);
+      put(x, y + 1, z, row ? B[row] : B.AIR, true);
+      put(x, y + 2, z, B.AIR, true);
+    }
+  }
 }
 
 // Is (wx, wz) inside a village footprint? Cheap enough to call per column and
@@ -283,6 +317,8 @@ function buildHouse(seed, house, put) {
 export function inVillage(seed, wx, wz) {
   for (const v of villagesNear(seed, wx, wz, 64)) {
     if (Math.abs(v.x - wx) <= 3 && Math.abs(v.z - wz) <= 3) return true;
+    const f = villageFarm(seed, v);
+    if (f && wx >= f.x0 - 2 && wx < f.x0 + FARM_W + 2 && wz >= f.z0 - 2 && wz < f.z0 + FARM_D + 2) return true;
     for (const h of villageHouses(seed, v)) {
       if (Math.abs(h.x - wx) <= (h.w >> 1) + 2 && Math.abs(h.z - wz) <= (h.d >> 1) + 2) return true;
     }
@@ -312,6 +348,9 @@ export function decorateVillages(seed, cx, cz, put) {
         put(px, heightAt(seed, px, pz), pz, B.DIRT_PATH);
       }
     }
+    // After the paths, so a path never fills in the farm's water channel.
+    const farm = villageFarm(seed, v);
+    if (farm) buildFarm(seed, farm, put);
   }
 }
 
@@ -351,14 +390,15 @@ export function decoratePlants(seed, cx, cz, put) {
 export function generateChunk(seed, cx, cz, data) {
   generateTerrain(seed, cx, cz, data);
   const baseX = cx * CHUNK_X, baseZ = cz * CHUNK_Z;
-  const put = (wx, wy, wz, id) => {
+  // `force` lets a feature replace terrain (a farm tilling the grass).
+  const put = (wx, wy, wz, id, force) => {
     const lx = wx - baseX, lz = wz - baseZ;
     if (lx < 0 || lz < 0 || lx >= CHUNK_X || lz >= CHUNK_Z || wy < 0 || wy >= CHUNK_Y) return;
     const k = idx(lx, wy, lz);
     // Features never carve through terrain except where they mean to
     // (house interiors pass B.AIR explicitly).
     const cur = data[k];
-    if (id === B.AIR || cur === B.AIR || cur === B.WATER || cur === B.TALL_GRASS) data[k] = id;
+    if (force || id === B.AIR || cur === B.AIR || cur === B.WATER || cur === B.TALL_GRASS) data[k] = id;
   };
   decorateVillages(seed, cx, cz, put);
   for (let dx = -1; dx <= 1; dx++) {

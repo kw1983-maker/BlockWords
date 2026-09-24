@@ -2,9 +2,11 @@
 // (which can sit anywhere in the grid, like the original) and shapeless ones.
 
 import { ITEMS } from './items.js';
+import { WOOL_COLOURS } from './blocks.js';
 
 export const PLANKS = ['oak_planks', 'birch_planks'];
 export const LOGS = ['oak_log', 'birch_log', 'spruce_log'];
+export const WOOLS = WOOL_COLOURS.map((c) => c[0] + '_wool');
 
 export const RECIPES = [];
 
@@ -22,6 +24,8 @@ shaped('sign', 3, ['###', '###', ' S '], { '#': PLANKS, S: ['stick'] });
 shaped('bookshelf', 1, ['###', 'WWW', '###'], { '#': PLANKS, W: ['wheat'] });
 shaped('bread', 1, ['WWW'], { W: ['wheat'] });
 shaped('bricks', 1, ['##', '##'], { '#': ['clay_ball'] });
+shaped('bed', 1, ['WWW', 'PPP'], { W: WOOLS, P: PLANKS });
+shaped('bucket', 1, ['I I', ' I '], { I: ['iron_ingot'] });
 
 // --- tools: the ladder every Minecraft game climbs
 const TOOL_MATS = {
@@ -36,6 +40,7 @@ for (const mat of Object.keys(TOOL_MATS)) {
   shaped(mat + '_pickaxe', 1, ['MMM', ' S ', ' S '], { M, S });
   shaped(mat + '_axe', 1, ['MM', 'MS', ' S'], { M, S });
   shaped(mat + '_shovel', 1, ['M', 'S', 'S'], { M, S });
+  shaped(mat + '_hoe', 1, ['MM', ' S', ' S'], { M, S });
   shaped(mat + '_sword', 1, ['M', 'M', 'S'], { M, S });
 }
 
@@ -119,6 +124,7 @@ export const SMELTING = {
   raw_beef: 'cooked_beef',
   raw_mutton: 'cooked_mutton',
   raw_chicken: 'cooked_chicken',
+  potato: 'baked_potato',
 };
 delete SMELTING.clay; // no brick item — clay stays a building block
 
